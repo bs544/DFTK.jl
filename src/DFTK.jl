@@ -146,6 +146,7 @@ export direct_minimization
 export newton
 export load_scfres, save_scfres
 include("scf/chi0models.jl")
+include("scf/constrain.jl")
 include("scf/mixing.jl")
 include("scf/scf_solvers.jl")
 include("scf/nbands_algorithm.jl")

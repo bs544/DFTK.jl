@@ -19,7 +19,12 @@ import Base: @kwdef
 # If mixing is done in the potential, the interface is
 # `mix_potential(mixing, basis, δF; kwargs...) -> δV`
 abstract type Mixing end
-function mix_potential(args...; kwargs...)
+
+#adding potential residual modification for constrained DFT here
+function mix_potential(mixing, basis, δV, args...; constraints, info_next, kwargs...)
+    if !isnothing(constraints)
+        add_constraint_to_residual!(δV,info_next.ρout,basis,constraints)
+    end
     mix_density(args...; kwargs...)
 end
 

@@ -241,6 +241,7 @@ trial_damping(damping::FixedDamping, args...) = damping.α
     acceleration=AndersonAcceleration(;m=10),
     accept_step=ScfAcceptStepAll(),
     max_backtracks=3,  # Maximal number of backtracking line searches
+    constraints=nothing,
 )
     # TODO Test other mixings and lift this
     @assert (   mixing isa SimpleMixing
@@ -250,6 +251,13 @@ trial_damping(damping::FixedDamping, args...) = damping.α
 
     if !isnothing(ψ)
         @assert length(ψ) == length(basis.kpoints)
+    end
+
+    if !isnothing(constraints)
+        # initially define a vector describing constraints
+        # at this point calculate the overlap matrix for the atomic functions
+        @assert typeof(constraints) == Vector{Constraint}
+        constraints = Constraints(constraints)
     end
 
     # Initial guess for V (if none given)
@@ -306,8 +314,8 @@ trial_damping(damping::FixedDamping, args...) = damping.α
             Vnext = info.Vin .+ α .* δV
 
             info_next    = EVρ(Vnext; ψ=guess, diagtol, info.eigenvalues, info.occupation)
-            Pinv_δV_next = mix_potential(mixing, basis, info_next.Vout - info_next.Vin;
-                                         n_iter, info_next...)
+            Pinv_δV_next = mix_potential(mixing, basis, info_next.Vout - info_next.Vin; 
+                                         constraints, n_iter, info_next...)
             push!(diagonalization, info_next.diagonalization)
             info_next = merge(info_next, (; α, diagonalization, ρin=info.ρout, n_iter,
                                           Pinv_δV=Pinv_δV_next))
