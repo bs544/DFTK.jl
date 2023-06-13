@@ -8,19 +8,22 @@ The density mixing constrained DFT method is a bit more involved.
 
 mutable struct Constraint
     atom_pos          :: Vector{Float64}
+    atom_idx          :: Int     #index of atom as specified in model
     r_sm              :: Float64 #cutoff radius for atomic function
     r_cut             :: Float64 #smearing width for atomic function
     spin_target       :: Float64
+    current_value     :: Float64
     cons_resid_weight :: Float64
     λ                 :: Float64 #Lagrange multiplier for constraint
 end
 
-function Constraint(model::Model,idx::Int,spin_target::Float64,cons_resid_weight::Float64=0.01,r_sm::Float64=0.1)::Constraint
+function Constraint(model::Model,idx::Int,spin_target::Float64,cons_resid_weight::Float64=0.01,r_sm_frac::Float64=0.05)::Constraint
     atom_pos = model.positions[idx]
     psp = model.atoms[idx].psp
     r_cut = maximum(psp.rp)
     r_cut = max(r_cut,psp.rloc)
-    return Constraint(atom_pos,r_sm,r_cut,spin_target,cons_resid_weight,0.0)
+    r_sm = r_cut*r_sm_frac
+    return Constraint(atom_pos,idx,r_sm,r_cut,spin_target,0.0, cons_resid_weight,0.0)
 end
 
 struct Constraints
@@ -153,6 +156,10 @@ function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},
     spin_ρ = spin_density(ρ)
 
     spins = integrate_atomic_functions(spin_ρ,basis,constraints).*2 #multiply by 2 to get it in Bohr Magnetons
+
+    for (i,cons) in enumerate(constraints.cons_vec)
+        cons.current_value = spins[i]
+    end
 
     spins -= [cons.spin_target for cons in constraints.cons_vec]
 

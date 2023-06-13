@@ -241,7 +241,7 @@ trial_damping(damping::FixedDamping, args...) = damping.α
     acceleration=AndersonAcceleration(;m=10),
     accept_step=ScfAcceptStepAll(),
     max_backtracks=3,  # Maximal number of backtracking line searches
-    constraints=nothing,
+    constraints=nothing, # vector of Constraint structs giving constraint information
 )
     # TODO Test other mixings and lift this
     @assert (   mixing isa SimpleMixing
@@ -353,6 +353,18 @@ trial_damping(damping::FixedDamping, args...) = damping.α
             info.occupation, info.εF, n_iter, info.ψ, info.n_bands_converge,
             info.diagonalization, stage=:finalize, algorithm="SCF",
             info.occupation_threshold)
+
+    if !isnothing(constraints)
+        constraint_info = []
+        for cons in constraints.cons_vec
+            λ = cons.λ
+            target = cons.spin_target
+            atom_idx = cons.atom_idx
+            current_value = cons.current_value
+            push!(constraint_info, (; atom_idx, target, λ, current_value))
+        end
+        info = merge(info, (; constraint_info))
+    end
     callback(info)
     info
 end
