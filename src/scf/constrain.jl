@@ -6,7 +6,7 @@ The potential mixing constrained DFT method only requires a change to the residu
 The density mixing constrained DFT method is a bit more involved.
 """
 
-struct Constraint
+mutable struct Constraint
     atom_pos          :: Vector{Float64}
     r_sm              :: Float64 #cutoff radius for atomic function
     r_cut             :: Float64 #smearing width for atomic function
@@ -29,20 +29,20 @@ struct Constraints
     overlap_inv :: Array{Float64,2}
 end
 
-function Constraints(cons_vec::Vector{Constraint})::Constraints
-    overlap = calculate_overlap(cons_vec)
+function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constraints
+    overlap = calculate_overlap(cons_vec,basis)
     overlap_inv = inv(overlap)
     return Constraints(cons_vec,overlap,overlap_inv)
 end
 
-function weight_fn(r::Vector{Float64},cons::Constraint)::Float64
+function weight_fn(r::AbstractVector{Float64},cons::Constraint)::Float64
     at_r = sqrt(sum((r - cons.atom_pos).^2))
     if at_r > cons.r_cut
         return 0.0
     elseif at_r < cons.r_cut-cons.r_sm
         return 1.0
     else
-        x = (r_cut-at_r)/r_sm
+        x = (cons.r_cut-at_r)/cons.r_sm
         return x^2 * (3 + x*(1 + x*( -6 + 3*x)))
     end
 end
@@ -68,7 +68,7 @@ function calculate_overlap(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::
     end
 
     #do the diagonal terms either way
-    for (i,cons) in enumerat(cons_vec)
+    for (i,cons) in enumerate(cons_vec)
         for r in r_vecs
             W_ij[i,i] += weight_fn(r,cons)^2
         end
@@ -89,14 +89,14 @@ function calculate_overlap(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::
     return W_ij .* (basis.model.unit_cell_volume/prod(size(r_vecs)))
 end
     
-function integrate_atomic_functions(arr::Array{Float64,4},basis::PlaneWaveBasis,constraints::Constraints)::Vector{Float64}
+function integrate_atomic_functions(arr::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints)::Vector{Float64}
     """
     integrate an array arr and the weight functions of each constraint
     """
 
     rvecs = collect(r_vectors(basis))
 
-    spins = zeros(Float64,length(constraints)) #called spins since this is what you get for integrating the spin density
+    spins = zeros(Float64,length(constraints.cons_vec)) #called spins since this is what you get for integrating the spin density
 
     for (i,cons) in enumerate(constraints.cons_vec)
         for j in eachindex(rvecs)
@@ -111,25 +111,26 @@ function integrate_atomic_functions(arr::Array{Float64,4},basis::PlaneWaveBasis,
     return spins
 end
 
-function orthogonalise_residual!(δV::Array{Float64,4},basis::PlaneWaveBasis,constraints::Constraints)::Array{Float64,3}
+function orthogonalise_residual!(δV::Array{Float64,4},basis::PlaneWaveBasis,constraints::Constraints)
     """
     Orthogonalise the residual with respect to the atomic weight functions
         δV = δV -  ∑ᵢ wᵢ(r) ∑ⱼ (W)ᵢⱼ⁻¹∫δV(r')wⱼ(r')dr'
     """
 
-    rvecs = collect(rvectors(basis))
+    rvecs = collect(r_vectors(basis))
 
-    δV_w_i = integrate_atomic_functions(δV,basis,constraints)
+    δV_w_i = [integrate_atomic_functions(δV[:,:,:,1],basis,constraints),integrate_atomic_functions(δV[:,:,:,2],basis,constraints)]
 
-    to_be_multiplied_by_weights = constraints.overlap_inv*δV_w_i
+    to_be_multiplied_by_weights = [constraints.overlap_inv*δV_w_i[1],constraints.overlap_inv*δV_w_i[2]]
 
     for (i,cons) in enumerate(constraints.cons_vec)
-        for j in eachindex(rvecs)
-            δV[j,1] -=  weight_fn(rvecs[j],cons)*to_be_multiplied_by_weights#spin up potential
-            δV[j,2] -= -weight_fn(rvecs[j],cons)*to_be_multiplied_by_weights#spin down potential
+        for j in CartesianIndices(rvecs)
+            δV[j,1] -=  weight_fn(rvecs[j],cons)*to_be_multiplied_by_weights[1][i]#spin up potential
+            δV[j,2] -= -weight_fn(rvecs[j],cons)*to_be_multiplied_by_weights[2][i]#spin down potential
         end
-        cons.λ = to_be_multiplied_by_weights
+        cons.λ = to_be_multiplied_by_weights[1][i]-to_be_multiplied_by_weights[2][i]
     end
+
 end      
 
 function add_resid_constraints!(δV::Array{Float64,4},dev_from_target::Vector{Float64},constraints::Constraints,basis::PlaneWaveBasis)
@@ -138,22 +139,25 @@ function add_resid_constraints!(δV::Array{Float64,4},dev_from_target::Vector{Fl
     """
     rvecs = collect(r_vectors(basis))
     W_ij = constraints.overlap_inv
-    for (i,cons) in enumerate(constraints)
+    for (i,cons) in enumerate(constraints.cons_vec)
         factor = cons.cons_resid_weight*(W_ij[i,:]⋅dev_from_target)    
-        for j in eachindex(rvecs)
-            δV += weight_fn(r_vecs[j],cons)*factor
+        for j in CartesianIndices(rvecs)
+            δV[j,1] += weight_fn(rvecs[j],cons)*factor
+            δV[j,2] -= weight_fn(rvecs[j],cons)*factor
         end
     end
+    
 end
 
 function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4}, basis::PlaneWaveBasis,constraints::Constraints)
+    spin_ρ = spin_density(ρ)
 
-    spins = integrate_atomic_functions(ρ[:,:,:,2],basis,constraints)
+    spins = integrate_atomic_functions(spin_ρ,basis,constraints).*2 #multiply by 2 to get it in Bohr Magnetons
 
     spins -= [cons.spin_target for cons in constraints.cons_vec]
 
     orthogonalise_residual!(δV,basis,constraints)
 
-    add_resid_contraints!(δV,spins,constraints)
+    add_resid_constraints!(δV,spins,constraints,basis)
 
 end

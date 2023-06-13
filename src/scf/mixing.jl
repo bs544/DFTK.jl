@@ -25,7 +25,7 @@ function mix_potential(mixing, basis, δV, args...; constraints, info_next, kwar
     if !isnothing(constraints)
         add_constraint_to_residual!(δV,info_next.ρout,basis,constraints)
     end
-    mix_density(args...; kwargs...)
+    mix_density(mixing, basis, δV, args...; info_next, kwargs...)
 end
 
 @doc raw"""

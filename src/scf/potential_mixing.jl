@@ -257,7 +257,7 @@ trial_damping(damping::FixedDamping, args...) = damping.α
         # initially define a vector describing constraints
         # at this point calculate the overlap matrix for the atomic functions
         @assert typeof(constraints) == Vector{Constraint}
-        constraints = Constraints(constraints)
+        constraints = Constraints(constraints,basis)
     end
 
     # Initial guess for V (if none given)
@@ -281,7 +281,7 @@ trial_damping(damping::FixedDamping, args...) = damping.α
     α_trial   = trial_damping(damping)
     diagtol   = determine_diagtol((; ρin=ρ, Vin=V, n_iter))
     info      = EVρ(V; diagtol, ψ)
-    Pinv_δV   = mix_potential(mixing, basis, info.Vout - info.Vin; n_iter, info...)
+    Pinv_δV   = mix_potential(mixing, basis, info.Vout - info.Vin; constraints, n_iter, info_next=info) #had to remove the splatting operator, this may cause issues
     info      = merge(info, (; α=NaN, diagonalization=[info.diagonalization], ρin=ρ,
                              n_iter, Pinv_δV))
     ΔEdown    = 0.0
@@ -315,7 +315,7 @@ trial_damping(damping::FixedDamping, args...) = damping.α
 
             info_next    = EVρ(Vnext; ψ=guess, diagtol, info.eigenvalues, info.occupation)
             Pinv_δV_next = mix_potential(mixing, basis, info_next.Vout - info_next.Vin; 
-                                         constraints, n_iter, info_next...)
+                                         constraints, n_iter, info_next)#removed splatting operator here too
             push!(diagonalization, info_next.diagonalization)
             info_next = merge(info_next, (; α, diagonalization, ρin=info.ρout, n_iter,
                                           Pinv_δV=Pinv_δV_next))
