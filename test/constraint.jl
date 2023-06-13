@@ -13,9 +13,9 @@ function run_iron_constrain()
     model = convert(Model{Float64}, model)
 
     idx = 1
-    resid_weight = 1.5
+    resid_weight = 0.5
     r_sm_frac = 0.05
-    α = 0.8
+    α = 0.5
 
     basis = PlaneWaveBasis(model; Ecut=20, kgrid=[4, 4, 4])
     
@@ -24,8 +24,8 @@ function run_iron_constrain()
     n_steps = []
     V = nothing
     ρ0 = guess_density(basis,magnetic_moments)
-    for spin in 1.5:0.1:2.0
-        constraints = [DFTK.Constraint(model,idx,spin,resid_weight,r_sm_frac)]
+    for spin in 1.5:0.05:1.7
+        constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin)]
         
         scfres = DFTK.scf_potential_mixing(basis; tol=1.0e-8,ρ=ρ0,V=V,constraints=constraints,maxiter=100,damping=DFTK.FixedDamping(α));
         push!(cons_infos,scfres.constraint_info)
@@ -36,10 +36,10 @@ function run_iron_constrain()
     end
     println("The zero for λ should correspond to the energy minimum")
     for (i,info) in enumerate(cons_infos)
-        λ_string  = string(info[1].λ)
+        λ_string  = string(info[1].λ_spin)
         e_string  = string(energies[i]-energies[1])
-        st_string = string(info[1].target)
-        sv_string = string(info[1].current_value)
+        st_string = string(info[1].target_spin)
+        sv_string = string(info[1].current_spin)
         
         λ_string  = λ_string[begin:min(length(λ_string),7)]
         e_string  = e_string[begin:min(length(e_string),7)]

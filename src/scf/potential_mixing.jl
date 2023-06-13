@@ -357,11 +357,17 @@ trial_damping(damping::FixedDamping, args...) = damping.α
     if !isnothing(constraints)
         constraint_info = []
         for cons in constraints.cons_vec
-            λ = cons.λ
-            target = cons.spin_target
+            λ_spin = cons.spin ? cons.λ_spin : nothing
+            λ_charge = cons.charge ? cons.λ_charge : nothing
+            
+            target_spin = cons.spin ? cons.target_spin : nothing
+            target_charge = cons.charge ? cons.target_charge : nothing
+
+            current_spin = cons.spin ? cons.current_spin : nothing
+            current_charge = cons.charge ? cons.current_charge : nothing
+
             atom_idx = cons.atom_idx
-            current_value = cons.current_value
-            push!(constraint_info, (; atom_idx, target, λ, current_value))
+            push!(constraint_info, (; atom_idx, target_spin, target_charge, λ_spin, λ_charge, current_spin, current_charge))
         end
         info = merge(info, (; constraint_info))
     end
