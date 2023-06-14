@@ -21,11 +21,11 @@ import Base: @kwdef
 abstract type Mixing end
 
 #adding potential residual modification for constrained DFT here
-function mix_potential(mixing, basis, δV, args...; constraints, info_next, kwargs...)
+function mix_potential(mixing, basis, δV, args...; constraints, ρout, kwargs...)
     if !isnothing(constraints)
-        add_constraint_to_residual!(δV,info_next.ρout,basis,constraints)
+        add_constraint_to_residual!(δV,ρout,basis,constraints)
     end
-    mix_density(mixing, basis, δV, args...; info_next, kwargs...)
+    mix_density(mixing, basis, δV, args...; ρout, kwargs...)
 end
 
 @doc raw"""

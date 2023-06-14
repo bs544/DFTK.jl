@@ -6,18 +6,22 @@ function run_iron_constrain()
 
     # Produce reference data and guess for this configuration
     Fe = ElementPsp(iron_bcc.atnum, psp=load_psp("hgh/lda/Fe-q8.hgh"))
-    atoms, positions = [Fe], [zeros(3)]
-    magnetic_moments = [2.0]
-    model = model_PBE(iron_bcc.lattice, iron_bcc.atoms, iron_bcc.positions;
+    atoms, positions = [Fe,Fe], [zeros(3),0.5.*ones(3)]
+    magnetic_moments = [2.0,2.0]
+    a = 5.42352
+    lattice = a .* [1.0 0.0 0.0;
+                    0.0 1.0 0.0;
+                    0.0 0.0 1.0]
+    model = model_PBE(lattice, atoms, positions;
                       temperature=0.01, magnetic_moments)
     model = convert(Model{Float64}, model)
 
     idx = 1
-    resid_weight = 0.5
+    resid_weight = 1.0
     r_sm_frac = 0.05
     α = 0.5
 
-    basis = PlaneWaveBasis(model; Ecut=20, kgrid=[4, 4, 4])
+    basis = PlaneWaveBasis(model; Ecut=15, kgrid=[4, 4, 4])
     
     cons_infos = []
     energies = []

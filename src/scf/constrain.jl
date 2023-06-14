@@ -237,7 +237,6 @@ function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},
 
     δV[:,:,:,1] = 0.5.*(δV_charge + δV_spin)
     δV[:,:,:,2] = 0.5.*(δV_charge - δV_spin)
-    println(constraints.cons_vec[1].current_charge)
 end
 
 
