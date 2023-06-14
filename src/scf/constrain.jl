@@ -26,6 +26,7 @@ mutable struct Constraint
     cons_resid_weight :: Float64
     λ_charge          :: Float64 #Lagrange multiplier for constraint
     λ_spin            :: Float64
+    unit_cell_volume  :: Float64 #sometimes useful to have, otherwise set to zero
 end
 
 function Constraint(model::Model,idx::Int,cons_resid_weight::Float64=1.0,r_sm_frac::Float64=0.05;target_spin=nothing,target_charge=nothing)::Constraint
@@ -45,7 +46,7 @@ function Constraint(model::Model,idx::Int,cons_resid_weight::Float64=1.0,r_sm_fr
         charge = false
     end
     @assert charge || spin
-    return Constraint(atom_pos,idx,spin,charge,r_sm,r_cut,target_spin,target_charge, 0.0, 0.0, cons_resid_weight,0.0,0.0)
+    return Constraint(atom_pos,idx,spin,charge,r_sm,r_cut,target_spin,target_charge, 0.0, 0.0, cons_resid_weight,0.0,0.0,0.0)
 end
 
 struct Constraints
@@ -57,8 +58,37 @@ end
 function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constraints
     overlap = calculate_overlap(cons_vec,basis)
     overlap_inv = inv(overlap)
+    unit_cell_volume = basis.model.unit_cell_volume
+    for cons in cons_vec
+        cons.unit_cell_volume = unit_cell_volume
+    end
     return Constraints(cons_vec,overlap,overlap_inv)
 end
+
+struct ArrayAndConstraints
+    """
+    Struct to combine either the residual or the density with the constraints
+    """
+    arr         :: Array{Float64,4}
+    λ           :: Array{Float64,2} #first dimension for constraints, second defines either spin or charge
+    weight      :: Array{Float64,2} #define based on both cons_resid_weight and the unit cell volume
+end
+
+function ArrayAndConstraints(arr:Array{Float64,4},constraints::Constraints)::ArrayAndConstraints
+    λ = zeros(Float64,length(constraints.cons_vec),2)
+    weight = ones(Float64,size(λ))
+    for (i,cons) in enumerate(constraints.cons_vec)
+        weight[i,:] .*= cons.unit_cell_volume
+    end
+    return ArrayAndConstraints(arr,λ,weight)
+end
+
+Base.:+(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr + b.arr,a.λ+b.λ,a.weight)
+Base.:-(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr - b.arr,a.λ-b.λ,a.weight)
+Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.λ .* a.weight))
+LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.λ .* a.weight)
+
+charge_density(ρ::Array{Float64,4}) = ρ[:,:,:,1]+ρ[:,:,:,2]
 
 function weight_fn(r::AbstractVector{Float64},cons::Constraint)::Float64
     at_r = sqrt(sum((r - cons.atom_pos).^2))
@@ -224,12 +254,35 @@ function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{F
     end
 end
 
+function display_constraints(constraints::Vector{Constraint})
+
+    println("Atom idx  |  Constraint Type  |  λ     |  Current Value  |  Target Value ")
+    println("-------------------------------------------------------------------------")
+    for cons in constraints.cons_vec
+        idx = rpad(cons.atom_idx,9," ")
+        if cons.spin
+            λ = rpad(cons.λ_spin,6," ")[begin:6]
+            current = rpad(cons.current_spin,15," ")[begin:15]
+            target = rpad(cons.target_spin,13," ")[begin:13]
+            println(" $idx|  spin             |  $λ|  $current|  $target")
+        end
+        if cons.charge
+            λ = rpad(cons.λ_charge,6," ")[begin:6]
+            current = rpad(cons.current_charge,15," ")[begin:15]
+            target = rpad(cons.target_charge,13," ")[begin:13]
+            println(" $idx|  charge           |  $λ|  $current|  $target")
+        end
+    end
+end
+
+display_constraints(constraints::Constraints) = display_constraints(constraints.cons_vec)
+
 function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4}, basis::PlaneWaveBasis,constraints::Constraints)
 
     δV_charge = δV[:,:,:,1]+δV[:,:,:,2]
     δV_spin   = δV[:,:,:,1]-δV[:,:,:,2]
 
-    ρ_charge = total_density(ρ)
+    ρ_charge = charge_density(ρ)
     ρ_spin = spin_density(ρ)
 
     add_constraint_to_residual_component!(δV_charge,ρ_charge,basis,constraints,false)
@@ -239,4 +292,186 @@ function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},
     δV[:,:,:,2] = 0.5.*(δV_charge - δV_spin)
 end
 
+function add_constraint_to_potential!(V::Array{Float64,4},basis::PlaneWaveBasis,constraints::Constraints)
+    charge_addition = ones(Float64,size(V))
+    spin_addition   = ones(Float64,size(V))
+    charge_constraints = get_spin_charge_constraints(constraints,false)
+    spin_constraints   = get_spin_charge_constraints(constraints,true)
 
+    add_resid_constraints!(charge_addition,[cons.λ_charge for cons in charge_constraints.cons_vec],charge_constraints)
+    add_resid_constraints!(spin_addition,  [cons.λ_spin for cons in spin_constraints.cons_vec],    spin_constraints)
+
+    V[:,:,:,1] += charge_addition + spin_addition
+    V[:,:,:,2] += charge_addition - spin_addition
+end
+
+
+@timing function scf_constrained_density_mixing(
+    basis::PlaneWaveBasis;
+    damping=FixedDamping(0.8),
+    nbandsalg::NbandsAlgorithm=AdaptiveBands(basis.model),
+    fermialg::AbstractFermiAlgorithm=default_fermialg(basis.model),
+    ρ=guess_density(basis),
+    V=nothing,
+    ψ=nothing,
+    tol=1e-6,
+    maxiter=100,
+    eigensolver=lobpcg_hyper,
+    diag_miniter=1,
+    determine_diagtol=ScfDiagtol(),
+    mixing=SimpleMixing(),
+    is_converged=ScfConvergenceDensity(tol),
+    callback=ScfDefaultCallback(),
+    acceleration=AndersonAcceleration(;m=10),
+    accept_step=ScfAcceptStepAll(),
+    max_backtracks=3,  # Maximal number of backtracking line searches
+    constraints=nothing, # vector of Constraint structs giving constraint information
+)
+    # TODO Test other mixings and lift this
+    @assert (   mixing isa SimpleMixing
+             || mixing isa KerkerMixing
+             || mixing isa KerkerDosMixing)
+    damping isa Number && (damping = FixedDamping(damping))
+
+    if !isnothing(ψ)
+        @assert length(ψ) == length(basis.kpoints)
+    end
+
+    @assert !isnothing(constraints)
+    @assert typeof(constraints) == Vector{Constraint}
+    constraints = Constraints(constraints,basis)
+
+    ρ = ArrayAndConstraints(ρ,constraints)
+
+    # Initial guess for V (if none given)
+    ham = energy_hamiltonian(basis, nothing, nothing; ρ.arr).ham
+    isnothing(V) && (V = total_local_potential(ham))
+
+    function EVρ(Vin; diagtol=tol / 10, ψ=nothing, eigenvalues=nothing, occupation=nothing)
+        ham_V = hamiltonian_with_total_potential(ham, Vin)
+
+        res_V = next_density(ham_V, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
+                             occupation, miniter=diag_miniter, tol=diagtol)
+        new_E, new_ham = energy_hamiltonian(basis, res_V.ψ, res_V.occupation;
+                                            ρ=res_V.ρout, eigenvalues=res_V.eigenvalues,
+                                            εF=res_V.εF)
+        (; basis, ham=new_ham, energies=new_E,
+         Vin, Vout=total_local_potential(new_ham), res_V...)
+    end
+
+    function residual(ρin::ArrayAndConstraints,ρout::ArrayAndConstraints,constraints::Constraints,basis::PlaneWaveBasis)::ArrayAndConstraints
+        resid_arr = ρout.arr - ρin.arr
+        resid_λ   = zeros(Float64,size(ρin.λ))
+
+        spin_values = integrate_atomic_functions(spin_density(ρout.arr),basis,constraints)
+        charge_values = integrate_atomic_functions(charge_density(ρout.arr),basis,constraints)
+
+        for (i,cons) in enumerate(constraints.cons_vec)
+            if cons.charge
+                resid_λ[i,1] = charge_values[i]-cons.target_charge
+            end
+            if cons.spin
+                resid_λ[i,2] = spin_values[i] - cons.target_spin
+            end
+        end
+        return ArrayAndConstraints(resid_arr,resid_λ,ρout.weight)
+    end
+
+    n_iter    = 1
+    converged = false
+    α_trial   = trial_damping(damping)
+    diagtol   = determine_diagtol((; ρin=ρ.arr, Vin=V, n_iter))
+    info      = EVρ(V; diagtol, ψ)
+    Pinv_δV   = mix_potential(mixing, basis, info.Vout - info.Vin; constraints, n_iter, info...)
+    info      = merge(info, (; α=NaN, diagonalization=[info.diagonalization], ρin=ρ,
+                             n_iter, Pinv_δV))
+    ΔEdown    = 0.0
+
+    while n_iter < maxiter
+        info = merge(info, (; stage=:iterate, algorithm="SCF", converged))
+        callback(info)
+        if MPI.bcast(is_converged(info), 0, MPI.COMM_WORLD)
+            # TODO Debug why these MPI broadcasts are needed
+            converged = true
+            break
+        end
+        n_iter += 1
+        info = merge(info, (; n_iter, ))
+
+        # Ensure same α on all processors
+        α_trial = MPI.bcast(α_trial, 0, MPI.COMM_WORLD)
+        δV = (acceleration(info.Vin, α_trial, info.Pinv_δV) - info.Vin) / α_trial
+
+        # Determine damping and take next step
+        guess   = info.ψ
+        α       = α_trial
+        successful  = false  # Successful line search (final step is considered good)
+        n_backtrack = 1
+        diagonalization = empty(info.diagonalization)
+        info_next = info
+        while n_backtrack ≤ max_backtracks
+            diagtol = determine_diagtol(info_next)
+            mpi_master() && @debug "Iteration $n_iter linesearch step $n_backtrack   α=$α diagtol=$diagtol"
+            Vnext = info.Vin .+ α .* δV
+
+            info_next    = EVρ(Vnext; ψ=guess, diagtol, info.eigenvalues, info.occupation)
+            Pinv_δV_next = mix_potential(mixing, basis, info_next.Vout - info_next.Vin; 
+                                         constraints, n_iter, info_next...)
+            push!(diagonalization, info_next.diagonalization)
+            info_next = merge(info_next, (; α, diagonalization, ρin=info.ρout, n_iter,
+                                          Pinv_δV=Pinv_δV_next))
+
+            successful = accept_step(info, info_next)
+            successful = MPI.bcast(successful, 0, MPI.COMM_WORLD)  # Ensure same successful
+            if successful || n_backtrack ≥ max_backtracks
+                break
+            end
+            n_backtrack += 1
+
+            # Adjust α to try again ...
+            α_next = propose_backtrack_damping(damping, info, info_next)
+            α_next = MPI.bcast(α_next, 0, MPI.COMM_WORLD)  # Ensure same α on all processors
+            if α_next == α  # Backtracking further not useful ...
+                break
+            end
+
+            # Adjust to guess fitting α best:
+            guess = α_next > α / 2 ? info_next.ψ : info.ψ
+            α = α_next
+        end
+
+        # Switch off acceleration in case of very bad steps
+        ΔE = info_next.energies.total - info.energies.total
+        ΔE < 0 && (ΔEdown = -max(abs(ΔE), tol))
+
+        # Update α_trial and commit the next state
+        α_trial = trial_damping(damping, info, info_next, successful)
+        info = info_next
+    end
+
+    ham  = hamiltonian_with_total_potential(ham, info.Vout)
+    info = (; ham, basis, info.energies, converged, ρ=info.ρout, info.eigenvalues,
+            info.occupation, info.εF, n_iter, info.ψ, info.n_bands_converge,
+            info.diagonalization, stage=:finalize, algorithm="SCF",
+            info.occupation_threshold)
+
+    if !isnothing(constraints)
+        constraint_info = []
+        for cons in constraints.cons_vec
+            λ_spin = cons.spin ? cons.λ_spin : nothing
+            λ_charge = cons.charge ? cons.λ_charge : nothing
+            
+            target_spin = cons.spin ? cons.target_spin : nothing
+            target_charge = cons.charge ? cons.target_charge : nothing
+
+            current_spin = cons.spin ? cons.current_spin : nothing
+            current_charge = cons.charge ? cons.current_charge : nothing
+
+            atom_idx = cons.atom_idx
+            push!(constraint_info, (; atom_idx, target_spin, target_charge, λ_spin, λ_charge, current_spin, current_charge))
+        end
+        info = merge(info, (; constraint_info))
+    end
+    callback(info)
+    info
+end

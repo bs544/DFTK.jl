@@ -48,7 +48,7 @@ function run_iron_constrain()
         λ_string  = λ_string[begin:min(length(λ_string),7)]
         e_string  = e_string[begin:min(length(e_string),7)]
         st_string = st_string[begin:min(length(st_string),5)]
-        sv_string = sv_string[begin:min(length(sv_string),5)]
+        sv_string = sv_string[begin:min(length(sv_string),8)]
         n_step_string = string(n_steps[i])
         println("λ: $λ_string \t energies: $e_string  \t nsteps: $n_step_string \t target: $st_string \t value: $sv_string")
     end
