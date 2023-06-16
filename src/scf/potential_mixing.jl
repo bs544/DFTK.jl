@@ -67,7 +67,16 @@ function (anderson::AndersonAcceleration)(xₙ, αₙ, Pfxₙ)
     end
 
     push!(anderson, xₙ, αₙ, Pfxₙ)
-    reshape(xₙ₊₁, size(xₙ))
+    
+    if typeof(xₙ) == ArrayAndConstraints
+        #in this case it's my wonky structure
+        arr_len = prod(size(xₙ.arr))
+        arr = reshape(xₙ₊₁[begin:arr_len],size(xₙ.arr))
+        multipliers = reshape(xₙ₊₁[arr_len:end],(:,2))
+        return (arr,multipliers)
+    else
+        return reshape(xₙ₊₁, size(xₙ))
+    end
 end
 
 function ScfAcceptStepAll()

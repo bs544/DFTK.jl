@@ -74,7 +74,7 @@ struct ArrayAndConstraints
     weight      :: Array{Float64,2} #define based on both cons_resid_weight and the unit cell volume
 end
 
-function ArrayAndConstraints(arr:Array{Float64,4},constraints::Constraints)::ArrayAndConstraints
+function ArrayAndConstraints(arr::Array{Float64,4},constraints::Constraints)::ArrayAndConstraints
     λ = zeros(Float64,length(constraints.cons_vec),2)
     weight = ones(Float64,size(λ))
     for (i,cons) in enumerate(constraints.cons_vec)
@@ -293,16 +293,28 @@ function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},
 end
 
 function add_constraint_to_potential!(V::Array{Float64,4},basis::PlaneWaveBasis,constraints::Constraints)
-    charge_addition = ones(Float64,size(V))
-    spin_addition   = ones(Float64,size(V))
+    charge_addition = ones(Float64,size(V)[1:3])
+    spin_addition   = ones(Float64,size(V)[1:3])
     charge_constraints = get_spin_charge_constraints(constraints,false)
     spin_constraints   = get_spin_charge_constraints(constraints,true)
 
-    add_resid_constraints!(charge_addition,[cons.λ_charge for cons in charge_constraints.cons_vec],charge_constraints)
-    add_resid_constraints!(spin_addition,  [cons.λ_spin for cons in spin_constraints.cons_vec],    spin_constraints)
+    add_resid_constraints!(charge_addition,[cons.λ_charge for cons in charge_constraints.cons_vec],charge_constraints,basis)
+    add_resid_constraints!(spin_addition,  [cons.λ_spin for cons in spin_constraints.cons_vec],    spin_constraints,basis)
 
     V[:,:,:,1] += charge_addition + spin_addition
     V[:,:,:,2] += charge_addition - spin_addition
+end
+
+function hamiltonian_with_constraint_and_density(ρ::ArrayAndConstraints,basis::PlaneWaveBasis,constraints::Constraints,ψ,occupation)::Hamiltonian
+
+    ham = energy_hamiltonian(basis,ψ,occupation; ρ=ρ.arr).ham
+        
+    Vin = total_local_potential(ham)
+    add_constraint_to_potential!(Vin,basis,constraints)
+    
+    ham = hamiltonian_with_total_potential(ham,Vin)
+
+    ham
 end
 
 
@@ -327,6 +339,11 @@ end
     max_backtracks=3,  # Maximal number of backtracking line searches
     constraints=nothing, # vector of Constraint structs giving constraint information
 )
+    """
+    Hacky trial implementation of the constrained DFT density mixing approach
+    Vinₙ --> ρoutₙ --> [Rₙ,{∂E/∂λₙⁱ}] --> [ρinₙ₊₁,λₙⁱ] --> Vinₙ₊₁
+    The mixing is done on this combination of the density and Lagrange multipliers using the residual and the lagrange multiplier gradients
+    """
     # TODO Test other mixings and lift this
     @assert (   mixing isa SimpleMixing
              || mixing isa KerkerMixing
@@ -344,27 +361,26 @@ end
     ρ = ArrayAndConstraints(ρ,constraints)
 
     # Initial guess for V (if none given)
-    ham = energy_hamiltonian(basis, nothing, nothing; ρ.arr).ham
+    ham = energy_hamiltonian(basis, nothing, nothing; ρ=ρ.arr).ham
     isnothing(V) && (V = total_local_potential(ham))
 
-    function EVρ(Vin; diagtol=tol / 10, ψ=nothing, eigenvalues=nothing, occupation=nothing)
-        ham_V = hamiltonian_with_total_potential(ham, Vin)
+    function ρin2ρout(ρin; diagtol=tol / 10, ψ=nothing, eigenvalues=nothing, occupation=nothing)
 
-        res_V = next_density(ham_V, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
+        ham = hamiltonian_with_constraint_and_density(ρin,basis,constraints,ψ,occupation)
+
+        res_V = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
                              occupation, miniter=diag_miniter, tol=diagtol)
-        new_E, new_ham = energy_hamiltonian(basis, res_V.ψ, res_V.occupation;
-                                            ρ=res_V.ρout, eigenvalues=res_V.eigenvalues,
-                                            εF=res_V.εF)
-        (; basis, ham=new_ham, energies=new_E,
-         Vin, Vout=total_local_potential(new_ham), res_V...)
+        
+        (; basis, ham, ρin, energies=new_E,
+         Vin, res_V...)
     end
 
-    function residual(ρin::ArrayAndConstraints,ρout::ArrayAndConstraints,constraints::Constraints,basis::PlaneWaveBasis)::ArrayAndConstraints
-        resid_arr = ρout.arr - ρin.arr
+    function residual(ρin::ArrayAndConstraints,ρout::Array{Float64,4},constraints::Constraints,basis::PlaneWaveBasis)::ArrayAndConstraints
+        resid_arr = ρout - ρin.arr
         resid_λ   = zeros(Float64,size(ρin.λ))
 
-        spin_values = integrate_atomic_functions(spin_density(ρout.arr),basis,constraints)
-        charge_values = integrate_atomic_functions(charge_density(ρout.arr),basis,constraints)
+        spin_values = integrate_atomic_functions(spin_density(ρout),basis,constraints)
+        charge_values = integrate_atomic_functions(charge_density(ρout),basis,constraints)
 
         for (i,cons) in enumerate(constraints.cons_vec)
             if cons.charge
@@ -374,18 +390,25 @@ end
                 resid_λ[i,2] = spin_values[i] - cons.target_spin
             end
         end
-        return ArrayAndConstraints(resid_arr,resid_λ,ρout.weight)
+        return ArrayAndConstraints(resid_arr,resid_λ,ρin.weight)
     end
 
-    n_iter    = 1
+    function SCF_step!(ρin,n_iter,info,constraints,basis,diagtol)
+        info_next = ρin2ρout(ρin; ψ=info.guess, diagtol, info.eigenvalues, info.occupation)
+        Rₙ = residual(ρin,info_next.ρout,constraints,basis)
+        Rₙ.arr = mix_density(mixing, basis, Rₙ.arr; constraints, n_iter, info_next...)
+        ρout =  ArrayAndConstraints(acceleration(info.ρin, info.α, Rₙ))
+        update_constraints!(ρout, constraints)
+        n_iter += 1
+        ρin = ρout
+    end
+
+    n_iter = 1
     converged = false
-    α_trial   = trial_damping(damping)
-    diagtol   = determine_diagtol((; ρin=ρ.arr, Vin=V, n_iter))
-    info      = EVρ(V; diagtol, ψ)
-    Pinv_δV   = mix_potential(mixing, basis, info.Vout - info.Vin; constraints, n_iter, info...)
-    info      = merge(info, (; α=NaN, diagonalization=[info.diagonalization], ρin=ρ,
-                             n_iter, Pinv_δV))
-    ΔEdown    = 0.0
+    α = trial_damping(damping)
+    diagtol = determine_diagtol((; ρin=ρ.arr, Vin = V, n_iter))
+    info = ρin2ρout(ρ; diagtol, ψ)
+    info = merge(info, (; α))
 
     while n_iter < maxiter
         info = merge(info, (; stage=:iterate, algorithm="SCF", converged))
@@ -395,63 +418,12 @@ end
             converged = true
             break
         end
-        n_iter += 1
-        info = merge(info, (; n_iter, ))
-
-        # Ensure same α on all processors
-        α_trial = MPI.bcast(α_trial, 0, MPI.COMM_WORLD)
-        δV = (acceleration(info.Vin, α_trial, info.Pinv_δV) - info.Vin) / α_trial
-
-        # Determine damping and take next step
-        guess   = info.ψ
-        α       = α_trial
-        successful  = false  # Successful line search (final step is considered good)
-        n_backtrack = 1
-        diagonalization = empty(info.diagonalization)
-        info_next = info
-        while n_backtrack ≤ max_backtracks
-            diagtol = determine_diagtol(info_next)
-            mpi_master() && @debug "Iteration $n_iter linesearch step $n_backtrack   α=$α diagtol=$diagtol"
-            Vnext = info.Vin .+ α .* δV
-
-            info_next    = EVρ(Vnext; ψ=guess, diagtol, info.eigenvalues, info.occupation)
-            Pinv_δV_next = mix_potential(mixing, basis, info_next.Vout - info_next.Vin; 
-                                         constraints, n_iter, info_next...)
-            push!(diagonalization, info_next.diagonalization)
-            info_next = merge(info_next, (; α, diagonalization, ρin=info.ρout, n_iter,
-                                          Pinv_δV=Pinv_δV_next))
-
-            successful = accept_step(info, info_next)
-            successful = MPI.bcast(successful, 0, MPI.COMM_WORLD)  # Ensure same successful
-            if successful || n_backtrack ≥ max_backtracks
-                break
-            end
-            n_backtrack += 1
-
-            # Adjust α to try again ...
-            α_next = propose_backtrack_damping(damping, info, info_next)
-            α_next = MPI.bcast(α_next, 0, MPI.COMM_WORLD)  # Ensure same α on all processors
-            if α_next == α  # Backtracking further not useful ...
-                break
-            end
-
-            # Adjust to guess fitting α best:
-            guess = α_next > α / 2 ? info_next.ψ : info.ψ
-            α = α_next
-        end
-
-        # Switch off acceleration in case of very bad steps
-        ΔE = info_next.energies.total - info.energies.total
-        ΔE < 0 && (ΔEdown = -max(abs(ΔE), tol))
-
-        # Update α_trial and commit the next state
-        α_trial = trial_damping(damping, info, info_next, successful)
-        info = info_next
+        SCF_step!(ρin, n_iter, info,constraints,basis,diagtol)
     end
 
-    ham  = hamiltonian_with_total_potential(ham, info.Vout)
-    info = (; ham, basis, info.energies, converged, ρ=info.ρout, info.eigenvalues,
-            info.occupation, info.εF, n_iter, info.ψ, info.n_bands_converge,
+    ham = hamiltonian_with_constraint_and_density(ρin,basis,constraints,info.guess,info.occupation)
+    info = (; ham, basis, info.energies, converged, ρ=ρin.arr, info.eigenvalues,
+            info.occupation, info.εF, n_iter, info.ψ, info.n_bands, info.n_bands_converge,
             info.diagonalization, stage=:finalize, algorithm="SCF",
             info.occupation_threshold)
 
