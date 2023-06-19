@@ -338,6 +338,53 @@ function update_constraints!(ρ::ArrayAndConstraints,constraints::Constraints,ba
     end
 end
 
+@timing function scf_constrained_dm(    basis::PlaneWaveBasis;
+    damping=FixedDamping(0.8),
+    nbandsalg::NbandsAlgorithm=AdaptiveBands(basis.model),
+    fermialg::AbstractFermiAlgorithm=default_fermialg(basis.model),
+    ρ=guess_density(basis),
+    V=nothing,
+    ψ=nothing,
+    tol=1e-6,
+    maxiter=100,
+    eigensolver=lobpcg_hyper,
+    diag_miniter=1,
+    determine_diagtol=ScfDiagtol(),
+    mixing=SimpleMixing(),
+    is_converged=ScfConvergenceDensity(tol),
+    callback=ScfDefaultCallback(),
+    acceleration=AndersonAcceleration(;m=10),
+    accept_step=ScfAcceptStepAll(),
+    max_backtracks=3,  # Maximal number of backtracking line searches
+    constraints=nothing, # vector of Constraint structs giving constraint information
+)
+    """
+    Take 2...
+    Hacky trial implementation of the constrained DFT density mixing approach
+    Vinₙ --> ρoutₙ --> [Rₙ,{∂E/∂λₙⁱ}] --> [ρinₙ₊₁,λₙⁱ] --> Vinₙ₊₁
+    The mixing is done on this combination of the density and Lagrange multipliers using the residual and the lagrange multiplier gradients
+    """
+    # TODO Test other mixings and lift this
+    @assert (   mixing isa SimpleMixing
+             || mixing isa KerkerMixing
+             || mixing isa KerkerDosMixing)
+    damping isa Number && (damping = FixedDamping(damping))
+
+    if !isnothing(ψ)
+        @assert length(ψ) == length(basis.kpoints)
+    end
+
+    @assert !isnothing(constraints)
+    @assert typeof(constraints) == Vector{Constraint}
+    constraints = Constraints(constraints,basis)
+
+    ρ = ArrayAndConstraints(ρ,constraints)
+
+    # Initial guess for V (if none given)
+    ham = energy_hamiltonian(basis, nothing, nothing; ρ=ρ.arr).ham
+    isnothing(V) && (V = total_local_potential(ham))
+end
+
 @timing function scf_constrained_density_mixing(
     basis::PlaneWaveBasis;
     damping=FixedDamping(0.8),
