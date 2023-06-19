@@ -65,7 +65,7 @@ function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constr
     return Constraints(cons_vec,overlap,overlap_inv)
 end
 
-struct ArrayAndConstraints
+mutable struct ArrayAndConstraints
     """
     Struct to combine either the residual or the density with the constraints
     """
@@ -78,7 +78,7 @@ function ArrayAndConstraints(arr::Array{Float64,4},constraints::Constraints)::Ar
     λ = zeros(Float64,length(constraints.cons_vec),2)
     weight = ones(Float64,size(λ))
     for (i,cons) in enumerate(constraints.cons_vec)
-        weight[i,:] .*= cons.unit_cell_volume
+        weight[i,:] .*= cons.unit_cell_volume*cons.cons_resid_weight
     end
     return ArrayAndConstraints(arr,λ,weight)
 end
@@ -87,8 +87,14 @@ Base.:+(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.ar
 Base.:-(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr - b.arr,a.λ-b.λ,a.weight)
 Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.λ .* a.weight))
 LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.λ .* a.weight)
+Base.:*(a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.λ,b.weight)
+# Base.length(a::ArrayAndConstraints) = length(vec(a))
+
 
 charge_density(ρ::Array{Float64,4}) = ρ[:,:,:,1]+ρ[:,:,:,2]
+
+spin_density(ρ::ArrayAndConstraints) = spin_density(ρ.arr)
+charge_density(ρ::ArrayAndConstraints) = charge_density(ρ.arr)
 
 function weight_fn(r::AbstractVector{Float64},cons::Constraint)::Float64
     at_r = sqrt(sum((r - cons.atom_pos).^2))
@@ -258,7 +264,7 @@ function display_constraints(constraints::Vector{Constraint})
 
     println("Atom idx  |  Constraint Type  |  λ     |  Current Value  |  Target Value ")
     println("-------------------------------------------------------------------------")
-    for cons in constraints.cons_vec
+    for cons in constraints
         idx = rpad(cons.atom_idx,9," ")
         if cons.spin
             λ = rpad(cons.λ_spin,6," ")[begin:6]
@@ -305,18 +311,32 @@ function add_constraint_to_potential!(V::Array{Float64,4},basis::PlaneWaveBasis,
     V[:,:,:,2] += charge_addition - spin_addition
 end
 
-function hamiltonian_with_constraint_and_density(ρ::ArrayAndConstraints,basis::PlaneWaveBasis,constraints::Constraints,ψ,occupation)::Hamiltonian
+function hamiltonian_with_constraint_and_density(ρ::ArrayAndConstraints,basis::PlaneWaveBasis,constraints::Constraints;ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing)
 
-    ham = energy_hamiltonian(basis,ψ,occupation; ρ=ρ.arr).ham
+    new_E, ham = energy_hamiltonian(basis,ψ,occupation; ρ=ρ.arr,εF,eigenvalues)
         
     Vin = total_local_potential(ham)
     add_constraint_to_potential!(Vin,basis,constraints)
     
     ham = hamiltonian_with_total_potential(ham,Vin)
 
-    ham
+    ham,new_E,Vin
 end
 
+function update_constraints!(ρ::ArrayAndConstraints,constraints::Constraints,basis::PlaneWaveBasis)
+    spin_ρ = spin_density(ρ.arr)
+    charge_ρ = charge_density(ρ.arr)
+
+    spins = integrate_atomic_functions(spin_ρ,basis,constraints)
+    charges = integrate_atomic_functions(charge_ρ,basis,constraints)
+    
+    for (i,cons) in enumerate(constraints.cons_vec)
+        cons.λ_charge = ρ.λ[i,1]
+        cons.λ_spin = ρ.λ[i,2]
+        cons.current_spin = spins[i]
+        cons.current_charge = charges[i]
+    end
+end
 
 @timing function scf_constrained_density_mixing(
     basis::PlaneWaveBasis;
@@ -364,14 +384,19 @@ end
     ham = energy_hamiltonian(basis, nothing, nothing; ρ=ρ.arr).ham
     isnothing(V) && (V = total_local_potential(ham))
 
-    function ρin2ρout(ρin; diagtol=tol / 10, ψ=nothing, eigenvalues=nothing, occupation=nothing)
+    function ρin2ρout(ρin, basis, constraints; diagtol=tol / 10, ψ=nothing, eigenvalues=nothing, occupation=nothing, εF=nothing)
 
-        ham = hamiltonian_with_constraint_and_density(ρin,basis,constraints,ψ,occupation)
+        ham,energies,Vin = hamiltonian_with_constraint_and_density(ρin,basis,constraints;ψ,occupation,eigenvalues,εF)
 
         res_V = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
                              occupation, miniter=diag_miniter, tol=diagtol)
-        
-        (; basis, ham, ρin, energies=new_E,
+        res_V = merge(res_V, (; diagonalization = [res_V.diagonalization]))# need the diagonalization as a vector for the adaptive damping case
+
+        Rₙ = residual(ρin,res_V.ρout,constraints,basis)
+        ρout = ρin + Rₙ # redefine the output density here for the purposes of the callback function
+        res_V = merge(res_V, (; ρout))
+
+        (; basis, ham, ρin, Rₙ, energies,
          Vin, res_V...)
     end
 
@@ -393,24 +418,31 @@ end
         return ArrayAndConstraints(resid_arr,resid_λ,ρin.weight)
     end
 
-    function SCF_step!(ρin,n_iter,info,constraints,basis,diagtol)
-        info_next = ρin2ρout(ρin; ψ=info.guess, diagtol, info.eigenvalues, info.occupation)
-        Rₙ = residual(ρin,info_next.ρout,constraints,basis)
+    function SCF_step!(n_iter,info,constraints,basis,diagtol)
+        info_next = ρin2ρout(info.ρin, basis, constraints; diagtol, ψ=info.ψ, info.eigenvalues, info.occupation,info.εF)
+        println(info_next.energies)
+        Rₙ = info_next.Rₙ
         Rₙ.arr = mix_density(mixing, basis, Rₙ.arr; constraints, n_iter, info_next...)
-        ρout =  ArrayAndConstraints(acceleration(info.ρin, info.α, Rₙ))
-        update_constraints!(ρout, constraints)
+        ρout =  info.ρin + α*Rₙ #ArrayAndConstraints(acceleration(info.ρin, info.α, Rₙ))
+        update_constraints!(ρout, constraints,basis)
         n_iter += 1
         ρin = ρout
+        info = info_next
+        info = merge(info, (; n_iter, ρin))
+        display_constraints(constraints)
     end
 
     n_iter = 1
     converged = false
     α = trial_damping(damping)
     diagtol = determine_diagtol((; ρin=ρ.arr, Vin = V, n_iter))
-    info = ρin2ρout(ρ; diagtol, ψ)
-    info = merge(info, (; α))
+    info = ρin2ρout(ρ, basis, constraints; diagtol, ψ)
+    info = merge(info, (; α, n_iter))
+
+    println(info.energies)
 
     while n_iter < maxiter
+        println(n_iter)
         info = merge(info, (; stage=:iterate, algorithm="SCF", converged))
         callback(info)
         if MPI.bcast(is_converged(info), 0, MPI.COMM_WORLD)
@@ -418,7 +450,7 @@ end
             converged = true
             break
         end
-        SCF_step!(ρin, n_iter, info,constraints,basis,diagtol)
+        SCF_step!( n_iter, info,constraints,basis,diagtol)
     end
 
     ham = hamiltonian_with_constraint_and_density(ρin,basis,constraints,info.guess,info.occupation)

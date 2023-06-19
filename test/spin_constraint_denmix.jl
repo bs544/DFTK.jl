@@ -17,9 +17,9 @@ function run_iron_constrain()
     model = convert(Model{Float64}, model)
 
     idx = 1
-    resid_weight = 1.0
+    resid_weight = 0.0 #1.0
     r_sm_frac = 0.05
-    α = 0.5
+    α = 0.1
 
     basis = PlaneWaveBasis(model; Ecut=15, kgrid=[4, 4, 4])
     
@@ -31,7 +31,7 @@ function run_iron_constrain()
     for spin in [1.5]#:0.05:1.7
         constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin)]
         
-        scfres = DFTK.scf_constrained_density_mixing(basis; tol=1.0e-8,ρ=ρ0,V=V,constraints=constraints,maxiter=100,damping=DFTK.FixedDamping(α));
+        scfres = DFTK.scf_constrained_density_mixing(basis; tol=1.0e-8,ρ=ρ0,V=V,constraints=constraints,maxiter=3,damping=DFTK.FixedDamping(α));
         push!(cons_infos,scfres.constraint_info)
         push!(energies,scfres.energies.total)
         push!(n_steps,scfres.n_iter)

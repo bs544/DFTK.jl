@@ -3,13 +3,14 @@ using CUDA
 using DFTK
 include("testcases.jl")
 
+
 # These are not yet the best tests, but just to ensure our GPU support
 # does not just break randomly
 
 @testset "CUDA silicon functionality test" begin
     function run_problem(; architecture)
         model = model_PBE(silicon.lattice, silicon.atoms, silicon.positions)
-        basis = PlaneWaveBasis(model; Ecut=10, kgrid=(3, 3, 3), architecture)
+        basis = PlaneWaveBasis(model; Ecut=30, kgrid=(3, 3, 3), architecture)
         self_consistent_field(basis; tol=1e-9, solver=scf_damping_solver(1.0))
     end
 
