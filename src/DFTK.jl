@@ -81,6 +81,11 @@ include("orbitals.jl")
 include("show.jl")
 include("supercell.jl")
 
+export Constraint
+export Constraints
+export ArrayAndConstraints
+include("constraint_types.jl")
+
 export Energies
 include("Energies.jl")
 
@@ -106,6 +111,8 @@ export compute_kernel
 export BlowupIdentity
 export BlowupCHV
 export BlowupAbinit
+export TermDensityConstraint
+export DensityMixingConstraints
 include("DispatchFunctional.jl")
 include("terms/terms.jl")
 
@@ -146,7 +153,7 @@ export direct_minimization
 export newton
 export load_scfres, save_scfres
 include("scf/chi0models.jl")
-include("scf/constrain.jl")
+include("scf/constrained_mixing.jl")
 include("scf/mixing.jl")
 include("scf/scf_solvers.jl")
 include("scf/nbands_algorithm.jl")

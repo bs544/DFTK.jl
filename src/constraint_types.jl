@@ -1,6 +1,7 @@
 """
-Adds the constrained potential to the hamiltonian given the modified density struct ArrayAndConstraints
-Also overloads the other ene_ops functions so that they can take in this struct so that it may be passed into energy_hamiltonian
+Adds the types used for the constraints. Specifically, Constraint, Constraints and ArrayAndConstraints. 
+    DensityMixingConstraints and TermDensityConstraint are defined in terms/constraint_term.jl
+
 """
 
 mutable struct Constraint
@@ -49,7 +50,7 @@ function calculate_overlap(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::
     """
     W_ij = zeros(Float64,length(cons_vec),length(cons_vec))
     overlap = zeros(Bool,length(cons_vec),length(cons_vec))
-    r_vecs = collect(r_vectors(basis))
+    r_vecs = collect(r_vectors_cart(basis))
 
     #check if there's any overlap
     for i = 1:length(cons_vec)-1
@@ -135,7 +136,7 @@ function ArrayAndConstraints(arr::Array{Float64,4},constraints::Constraints)::Ar
     λ = zeros(Float64,length(constraints.cons_vec),2)
     weight = ones(Float64,size(λ))
     for (i,cons) in enumerate(constraints.cons_vec)
-        weight[i,:] .*= cons.unit_cell_volume*cons.cons_resid_weight
+        weight[i,:] .*= prod(size(arr)[begin:3])*cons.cons_resid_weight #maybe unit cell volume?
     end
     return ArrayAndConstraints(arr,λ,weight)
 end
@@ -146,7 +147,7 @@ Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.λ .* a.weight))
 LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.λ .* a.weight)
 Base.:*(a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.λ,b.weight)
 
-ene_ops(args...;ρ::ArrayAndConstraints,kwargs...) = ene_ops(args...;ρ.arr,kwargs...)
+# ene_ops(args...;ρ::ArrayAndConstraints,kwargs...) = ene_ops(args...;ρ.arr,kwargs...)
 
 function weight_fn(r::AbstractVector{Float64},cons::Constraint)::Float64
     at_r = sqrt(sum((r - cons.atom_pos).^2))
@@ -160,11 +161,8 @@ function weight_fn(r::AbstractVector{Float64},cons::Constraint)::Float64
     end
 end
 
-
-struct DensityConstraint end
-
 function add_constraint_to_arr!(arr::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints,is_spin::Bool)
-    rvecs = collect(r_vectors(basis))
+    rvecs = collect(r_vectors_cart(basis))
     if is_spin
         λs = [cons.λ_spin   for cons in constraints.cons_vec]
     else
@@ -179,54 +177,58 @@ function add_constraint_to_arr!(arr::Array{Float64,3},basis::PlaneWaveBasis,cons
     end
 end
 
-struct TermDensityConstraint 
-    constraints::Constraints
+function get_constraints(basis::PlaneWaveBasis)::Constraints
+    for term in basis.terms
+        if :constraints in fieldnames(typeof(term))
+            return term.constraints
+        end
+    end
+    return nothing
 end
 
+function integrate_atomic_functions(arr::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints)::Vector{Float64}
+    """
+    integrate an array arr and the weight functions of each constraint
+    """
 
-@timing "ene_ops: constraint" function ene_ops(term::TermDensityConstraint,basis::PlaneWaveBasis;ρ::ArrayAndConstraints)
-    #update the constraints
-    for (i,cons) in enumerate(term.constraints.cons_vec)
-        cons.λ_charge = ρ.λ[i,1]
-        cons.λ_spin = ρ.λ[i,2]
+    rvecs = collect(r_vectors_cart(basis))
+
+    spins = zeros(Float64,length(constraints.cons_vec)) #called spins since this is what you get for integrating the spin density
+
+    for (i,cons) in enumerate(constraints.cons_vec)
+        for j in eachindex(rvecs)
+            w = weight_fn(rvecs[j],cons)
+            if w != 0.0
+                spins[i] += w * arr[j]
+            end
+        end
     end
-    #define the constrained potential array
-    pot_size = basis.fft_size
-    if basis.model.spin_polarization==:collinear
-        pot_size = (pot_size...,2)
-    end
-    constrained_potential=zeros(Float64,pot_size)
+
+    spins .*= basis.model.unit_cell_volume / prod(size(rvecs))
+    return spins
+end
+
+function residual(ρout::Array,ρin::ArrayAndConstraints,basis::PlaneWaveBasis)::ArrayAndConstraints
+    constraints = get_constraints(basis)
+    arr = ρout - ρin.arr
+    weight = ρin.weight
+
+    deriv_array = zeros(Float64,size(weight))
+    targets = zeros(Float64,size(weight))
     
-
-    charge_constraint_pot = zeros(Float64,basis.fft_size)
-    charge_constraints = get_spin_charge_constraints(term.constraints,false)
-    add_constraint_to_arr!(charge_constraint_pot,basis,charge_constraints,false)
-
-
-    if length(pot_size)==4 # then spin and charge can be constrained, so do the spin too
-        
-        spin_constraint_pot = zeros(Float64,basis.fft_size)
-        spin_constraints   = get_spin_charge_constraints(term.constraints,true)
-        add_constraint_to_arr!(spin_constraint_pot,basis,spin_constraints,true)
-
-        constrained_potential[:,:,:,1] = 0.5.*(charge_constraint_pot+spin_constraint_pot)
-        constrained_potential[:,:,:,2] = 0.5.*(charge_constraint_pot-spin_constraint_pot)
+    #λ values here are ∂E/∂λᵢ, which is just the deviation of the density from the constraint
+    treat_spin = false
+    if length(size(ρout))==4
+        charge_density = ρout[:,:,:,1] + ρout[:,:,:,2]
+        if size(ρout)[end]==2
+            treat_spin = true
+            spin_density = ρout[:,:,:,1] - ρout[:,:,:,2]
+        end
     else
-        constrained_potential = charge_constraint_pot
+        charge_density = ρout
     end
 
-    ops = [RealSpaceMultiplication(basis, kpt, constrained_potential[:,:,:,kpt.spin])
-           for kpt in basis.kpoints]
-    if :ρ in keys(kwargs)
-        E = sum(total_density(ρ.arr) .* constrained_potential) * basis.dvol
-    else
-        E = T(Inf)
-    end
+    deriv_array[:,1] = 
 
-    (; E, ops)
-
-end
-
-
-
+    
 

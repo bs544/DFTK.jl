@@ -120,12 +120,23 @@ Overview of parameters:
 
         # Note that ρin is not the density of ψ, and the eigenvalues
         # are not the self-consistent ones, which makes this energy non-variational
-        energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρin, eigenvalues, εF)
+        if typeof(ρin)==ArrayAndConstraints
+          energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρin.arr, eigenvalues, εF, cons_λ=ρin.λ,cons_weight=ρin.weight)
+        else
+          energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρin, eigenvalues, εF)
+        end
+
 
         # Diagonalize `ham` to get the new state
         nextstate = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
                                  occupation, miniter=1, tol=determine_diagtol(info))
         ψ, eigenvalues, occupation, εF, ρout = nextstate
+
+        if typeof(ρin)==ArrayAndConstraints
+          # case when constrained dft is happening
+          # adding this to make sure that when the residual (ρout-ρin) is calculated, it includes the gradient of the energy wrt the lagrange multipliers
+          ρout = residual(ρin,ρout) + ρin
+        end
 
         # Update info with results gathered so far
         info = (; ham, basis, converged, stage=:iterate, algorithm="SCF",

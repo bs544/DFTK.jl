@@ -8,31 +8,8 @@ The density mixing constrained DFT method is a bit more involved.
 NOTE: Charge constraints are harder to converge. Try smaller mixing parameters and smaller weights for the constrained part of the residual
 """
 
-
-
-
     
-function integrate_atomic_functions(arr::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints)::Vector{Float64}
-    """
-    integrate an array arr and the weight functions of each constraint
-    """
 
-    rvecs = collect(r_vectors(basis))
-
-    spins = zeros(Float64,length(constraints.cons_vec)) #called spins since this is what you get for integrating the spin density
-
-    for (i,cons) in enumerate(constraints.cons_vec)
-        for j in eachindex(rvecs)
-            w = weight_fn(rvecs[j],cons)
-            if w != 0.0
-                spins[i] += w * arr[j]
-            end
-        end
-    end
-
-    spins .*= basis.model.unit_cell_volume / prod(size(rvecs))
-    return spins
-end
 
 function orthogonalise_residual!(δV::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints,is_spin::Bool)
     """
@@ -40,7 +17,7 @@ function orthogonalise_residual!(δV::Array{Float64,3},basis::PlaneWaveBasis,con
         δV = δV -  ∑ᵢ wᵢ(r) ∑ⱼ (W)ᵢⱼ⁻¹∫δV(r')wⱼ(r')dr'
     """
 
-    rvecs = collect(r_vectors(basis))
+    rvecs = collect(r_vectors_cart(basis))
 
     δV_w_i = integrate_atomic_functions(δV,basis,constraints)
 
@@ -62,7 +39,7 @@ function add_resid_constraints!(δV::Array{Float64,3},dev_from_target::Vector{Fl
     """
     The part that's added to the residual is ∑ᵢ cᵢ wᵢ(r) ∑ⱼ(W)⁻¹ᵢⱼ (Nⱼ-Nⱼᵗ)
     """
-    rvecs = collect(r_vectors(basis))
+    rvecs = collect(r_vectors_cart(basis))
     W_ij = constraints.overlap_inv
     for (i,cons) in enumerate(constraints.cons_vec)
         factor = cons.cons_resid_weight*(W_ij[i,:]⋅dev_from_target)    

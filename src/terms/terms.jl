@@ -43,6 +43,7 @@ include("local.jl")
 breaks_symmetries(::ExternalFromReal) = true
 breaks_symmetries(::ExternalFromFourier) = true
 
+
 include("nonlocal.jl")
 include("hartree.jl")
 include("local_nonlinearity.jl")
@@ -51,6 +52,8 @@ include("ewald.jl")
 include("psp_correction.jl")
 include("entropy.jl")
 include("pairwise.jl")
+
+include("constraint_term.jl")
 
 include("magnetic.jl")
 breaks_symmetries(::Magnetic) = true
