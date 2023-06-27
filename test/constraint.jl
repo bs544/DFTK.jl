@@ -8,7 +8,7 @@ function run_iron_constrain()
     Fe = ElementPsp(iron_bcc.atnum, psp=load_psp("hgh/lda/Fe-q8.hgh"))
     atoms, positions = [Fe,Fe], [zeros(3),0.5.*ones(3)]
     magnetic_moments = [2.0,2.0]
-    a = 5.42352
+    a = 5.42352*0.99
     lattice = a .* [1.0 0.0 0.0;
                     0.0 1.0 0.0;
                     0.0 0.0 1.0]
@@ -18,7 +18,8 @@ function run_iron_constrain()
 
     idx = 1
     resid_weight = 1.0
-    r_sm_frac = 0.05
+    r_sm_frac = 0.1
+    r_cut = 2.0
     α = 0.5
 
     basis = PlaneWaveBasis(model; Ecut=15, kgrid=[4, 4, 4])
@@ -28,8 +29,8 @@ function run_iron_constrain()
     n_steps = []
     V = nothing
     ρ0 = guess_density(basis,magnetic_moments)
-    for spin in 1.5:0.05:1.7
-        constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin)]
+    for spin in 1.6:0.1:2.0
+        constraints = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,r_cut),DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
         
         scfres = DFTK.scf_potential_mixing(basis; tol=1.0e-8,ρ=ρ0,V=V,constraints=constraints,maxiter=100,damping=DFTK.FixedDamping(α));
         push!(cons_infos,scfres.constraint_info)

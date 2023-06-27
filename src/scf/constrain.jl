@@ -28,11 +28,13 @@ mutable struct Constraint
     λ_spin            :: Float64
 end
 
-function Constraint(model::Model,idx::Int,cons_resid_weight::Float64=1.0,r_sm_frac::Float64=0.05;target_spin=nothing,target_charge=nothing)::Constraint
-    atom_pos = model.positions[idx]
+function Constraint(model::Model,idx::Int,cons_resid_weight::Float64=1.0,r_sm_frac::Float64=0.05;r_cut=nothing,target_spin=nothing,target_charge=nothing)::Constraint
+    atom_pos = vector_red_to_cart(model,model.positions[idx])
     psp = model.atoms[idx].psp
-    r_cut = maximum(psp.rp)
-    r_cut = max(r_cut,psp.rloc)
+    if isnothing(r_cut)
+        r_cut = maximum(psp.rp)
+        r_cut = max(r_cut,psp.rloc)
+    end
     r_sm = r_cut*r_sm_frac
     spin = true
     charge = true
@@ -60,8 +62,27 @@ function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constr
     return Constraints(cons_vec,overlap,overlap_inv)
 end
 
-function weight_fn(r::AbstractVector{Float64},cons::Constraint)::Float64
-    at_r = sqrt(sum((r - cons.atom_pos).^2))
+function periodic_dist(r::AbstractVector{Float64},basis::PlaneWaveBasis)::Float64
+    #presumably a way better way of doing this somehow
+    red_vector = vector_cart_to_red(basis.model,r)
+    #the closest image will be in one of the 27 unit cells, so just focus on them
+    disp = [1.0,0.0,-1.0]
+    cell_disp = Array{Vector{Float64},3}(undef,3,3,3)
+    for i=1:3; for j = 1:3; for k=1:3
+        cell_disp[i,j,k] = [disp[i],disp[j],disp[k]]
+    end;end;end
+    red_vector_options = map(x->x+red_vector,cell_disp)
+    red_vector_options = vector_red_to_cart.(basis.model,red_vector_options)
+    red_vector_dists = norm.(red_vector_options)
+    return minimum(red_vector_dists)
+end
+
+
+
+
+
+function weight_fn(r::AbstractVector{Float64},cons::Constraint,basis::PlaneWaveBasis)::Float64
+    at_r = periodic_dist(r-cons.atom_pos,basis)
     if at_r > cons.r_cut
         return 0.0
     elseif at_r < cons.r_cut-cons.r_sm
@@ -78,7 +99,7 @@ function calculate_overlap(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::
     """
     W_ij = zeros(Float64,length(cons_vec),length(cons_vec))
     overlap = zeros(Bool,length(cons_vec),length(cons_vec))
-    r_vecs = collect(r_vectors(basis))
+    r_vecs = collect(r_vectors_cart(basis))
 
     #check if there's any overlap
     for i = 1:length(cons_vec)-1
@@ -95,7 +116,7 @@ function calculate_overlap(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::
     #do the diagonal terms either way
     for (i,cons) in enumerate(cons_vec)
         for r in r_vecs
-            W_ij[i,i] += weight_fn(r,cons)^2
+            W_ij[i,i] += weight_fn(r,cons,basis)^2
         end
     end
 
@@ -105,13 +126,13 @@ function calculate_overlap(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::
             for j = 1:length(cons_vec)
                 if overlap[i,j]
                     for r in r_vecs
-                        W_ij[i,j] += weight_fn(r,cons_vec[i])*weight_fn(r,cons_vec[j])
+                        W_ij[i,j] += weight_fn(r,cons_vec[i],basis)*weight_fn(r,cons_vec[j],basis)
                     end
                 end
             end
         end
     end
-    return W_ij .* (basis.model.unit_cell_volume/prod(size(r_vecs)))
+    return W_ij .* basis.dvol # (basis.model.unit_cell_volume/prod(size(r_vecs)))
 end
     
 function integrate_atomic_functions(arr::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints)::Vector{Float64}
@@ -119,20 +140,20 @@ function integrate_atomic_functions(arr::Array{Float64,3},basis::PlaneWaveBasis,
     integrate an array arr and the weight functions of each constraint
     """
 
-    rvecs = collect(r_vectors(basis))
+    rvecs = collect(r_vectors_cart(basis))
 
     spins = zeros(Float64,length(constraints.cons_vec)) #called spins since this is what you get for integrating the spin density
 
     for (i,cons) in enumerate(constraints.cons_vec)
         for j in eachindex(rvecs)
-            w = weight_fn(rvecs[j],cons)
+            w = weight_fn(rvecs[j],cons,basis)
             if w != 0.0
                 spins[i] += w * arr[j]
             end
         end
     end
 
-    spins .*= basis.model.unit_cell_volume / prod(size(rvecs))
+    spins .*= basis.dvol #basis.model.unit_cell_volume / prod(size(rvecs))
     return spins
 end
 
@@ -142,7 +163,7 @@ function orthogonalise_residual!(δV::Array{Float64,3},basis::PlaneWaveBasis,con
         δV = δV -  ∑ᵢ wᵢ(r) ∑ⱼ (W)ᵢⱼ⁻¹∫δV(r')wⱼ(r')dr'
     """
 
-    rvecs = collect(r_vectors(basis))
+    rvecs = collect(r_vectors_cart(basis))
 
     δV_w_i = integrate_atomic_functions(δV,basis,constraints)
 
@@ -150,7 +171,7 @@ function orthogonalise_residual!(δV::Array{Float64,3},basis::PlaneWaveBasis,con
 
     for (i,cons) in enumerate(constraints.cons_vec)
         for j in CartesianIndices(rvecs)
-            δV[j] -=  weight_fn(rvecs[j],cons)*to_be_multiplied_by_weights[1][i]
+            δV[j] -=  weight_fn(rvecs[j],cons,basis)*to_be_multiplied_by_weights[i]
         end
         if is_spin
             cons.λ_spin = to_be_multiplied_by_weights[i]
@@ -164,12 +185,12 @@ function add_resid_constraints!(δV::Array{Float64,3},dev_from_target::Vector{Fl
     """
     The part that's added to the residual is ∑ᵢ cᵢ wᵢ(r) ∑ⱼ(W)⁻¹ᵢⱼ (Nⱼ-Nⱼᵗ)
     """
-    rvecs = collect(r_vectors(basis))
+    rvecs = collect(r_vectors_cart(basis))
     W_ij = constraints.overlap_inv
     for (i,cons) in enumerate(constraints.cons_vec)
         factor = cons.cons_resid_weight*(W_ij[i,:]⋅dev_from_target)    
         for j in CartesianIndices(rvecs)
-            δV[j] += weight_fn(rvecs[j],cons)*factor
+            δV[j] += weight_fn(rvecs[j],cons,basis)*factor
         end
     end
 end
@@ -205,9 +226,9 @@ function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{F
     if length(tmp_constraints.cons_vec)>0
         current_vals = integrate_atomic_functions(ρ,basis,tmp_constraints)
 
-        if is_spin
-            current_vals .*= 2.0 #multiply by 2 to get it in Bohr Magnetons
-        end
+        # if is_spin
+        #     current_vals .*= 2.0 #multiply by 2 to get it in Bohr Magnetons
+        # end
 
         for (i,cons) in enumerate(tmp_constraints.cons_vec)
             if is_spin
@@ -224,6 +245,27 @@ function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{F
     end
 end
 
+function display_constraints(constraints::Vector{Constraint})
+
+    println("Atom idx  |  Constraint Type  |  λ     |  Current Value  |  Target Value ")
+    println("-------------------------------------------------------------------------")
+    for cons in constraints
+        idx = rpad(cons.atom_idx,9," ")
+        if cons.spin
+            λ = rpad(cons.λ_spin,6," ")[begin:6]
+            current = rpad(cons.current_spin,15," ")[begin:15]
+            target = rpad(cons.target_spin,13," ")[begin:13]
+            println(" $idx|  spin             |  $λ|  $current|  $target")
+        end
+        if cons.charge
+            λ = rpad(cons.λ_charge,6," ")[begin:6]
+            current = rpad(cons.current_charge,15," ")[begin:15]
+            target = rpad(cons.target_charge,13," ")[begin:13]
+            println(" $idx|  charge           |  $λ|  $current|  $target")
+        end
+    end
+end
+
 function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4}, basis::PlaneWaveBasis,constraints::Constraints)
 
     δV_charge = δV[:,:,:,1]+δV[:,:,:,2]
@@ -237,6 +279,8 @@ function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},
 
     δV[:,:,:,1] = 0.5.*(δV_charge + δV_spin)
     δV[:,:,:,2] = 0.5.*(δV_charge - δV_spin)
+
+    # display_constraints(constraints.cons_vec)
 end
 
 
