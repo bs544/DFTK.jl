@@ -35,6 +35,21 @@ function Base.push!(anderson::AndersonAcceleration, xₙ, αₙ, Pfxₙ)
     anderson
 end
 
+function back_to_array(x_new::Vector{Float64},x_old::ArrayAndConstraints)::ArrayAndConstraints
+    """
+    My attempt to crowbar in the ArrayAndConstraints into the anderson acceleration
+    This is to replace the initial "reshape(xₙ₊₁, size(xₙ))"
+    """
+    arr_length = prod(size(x_old.arr))
+    x_new_arr = reshape(x_new[begin:arr_length],size(x_old.arr))
+    x_new_weight = x_old.weight
+    x_new_λ = reshape(x_new[arr_length+1:end],size(x_old.λ))
+    x_new_λ ./= x_new_weight
+    return ArrayAndConstraints(x_new_arr,x_new_λ,x_new_weight)
+end
+
+back_to_array(x_new::Vector{Float64},x_old::AbstractArray) = reshape(x_new,size(x_old))
+
 # Gets the current xₙ, Pf(xₙ) and damping αₙ
 function (anderson::AndersonAcceleration)(xₙ, αₙ, Pfxₙ)
     xs   = anderson.iterates
@@ -67,7 +82,7 @@ function (anderson::AndersonAcceleration)(xₙ, αₙ, Pfxₙ)
     end
 
     push!(anderson, xₙ, αₙ, Pfxₙ)
-    reshape(xₙ₊₁, size(xₙ))
+    back_to_array(xₙ₊₁,xₙ) #reshape(xₙ₊₁, size(xₙ))
 end
 
 function ScfAcceptStepAll()

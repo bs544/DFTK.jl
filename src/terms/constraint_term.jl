@@ -45,7 +45,7 @@ end
 
 
 
-@timing "ene_ops: constraint" function ene_ops(term::TermDensityConstraint,basis::PlaneWaveBasis,ψ,occupation;ρ::Array,cons_λ::Array,cons_weight::Array)
+@timing "ene_ops: constraint" function ene_ops(term::TermDensityConstraint,basis::PlaneWaveBasis,ψ,occupation;ρ::Array,cons_λ::Array,cons_weight::Array,kwargs...)
     ρ = ArrayAndConstraints(ρ,cons_λ,cons_weight)
 
     #update the constraints

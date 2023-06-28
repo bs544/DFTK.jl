@@ -18,7 +18,7 @@ function run_iron_constrain()
     model = convert(Model{Float64}, model)
 
     idx = 1
-    resid_weight = 1.0
+    resid_weight = 0.00001
     r_sm_frac = 0.05
     α = 0.5
 
@@ -38,7 +38,18 @@ function run_iron_constrain()
     V = nothing
     
     ρ0 = guess_density(basis,magnetic_moments)
-    constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=1.7)]
+    spin = 1.7
+    constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin)]
+    ρ0 = ArrayAndConstraints(ρ0,constraints)
+    println(ρ0.weight)
+
+    scfres = DFTK.self_consistent_field(basis; tol=1.0e-8,ρ=ρ0,maxiter=100,damping=0.8);
+    # constraints= DFTK.get_constraints(basis)
+    # spin_density = DFTK.spin_density(scfres.ρ)
+    # spins = DFTK.integrate_atomic_functions(spin_density,basis,constraints)
+    # println(spins)
+
+
     # for spin in 1.5:0.05:1.7
     #     constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin)]
         

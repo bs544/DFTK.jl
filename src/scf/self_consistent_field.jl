@@ -135,25 +135,46 @@ Overview of parameters:
         if typeof(ρin)==ArrayAndConstraints
           # case when constrained dft is happening
           # adding this to make sure that when the residual (ρout-ρin) is calculated, it includes the gradient of the energy wrt the lagrange multipliers
-          ρout = residual(ρin,ρout) + ρin
+          ρout = residual(ρout,ρin,basis) + ρin
         end
+
 
         # Update info with results gathered so far
         info = (; ham, basis, converged, stage=:iterate, algorithm="SCF",
                 ρin, ρout, α=damping, n_iter, nbandsalg.occupation_threshold,
                 nextstate..., diagonalization=[nextstate.diagonalization])
+        #for some reason the ρout field isn't in the ArrayAndConstraints type,
+        #so I'm readding it here to see if that helps
+        info = merge(info,(;ρout))
 
         # Compute the energy of the new state
         if compute_consistent_energies
-            energies = energy_hamiltonian(basis, ψ, occupation;
+            if typeof(ρout)==ArrayAndConstraints
+              energies = energy_hamiltonian(basis, ψ, occupation;
+                                            ρ=ρout.arr, eigenvalues, εF, cons_λ=ρout.λ,cons_weight=ρout.weight).energies
+            else
+              energies = energy_hamiltonian(basis, ψ, occupation;
                                           ρ=ρout, eigenvalues, εF).energies
+            end
         end
         info = merge(info, (; energies))
-
         # Apply mixing and pass it the full info as kwargs
-        δρ = mix_density(mixing, basis, ρout - ρin; info...)
-        ρnext = ρin .+ T(damping) .* δρ
+        #This mixing is the preconditioning of the density residual
+        #I don't think the constraints need to be preconditioned in the same way, so just pass the array
+        if typeof(ρout)==ArrayAndConstraints
+          R = ρout.arr-ρin.arr
+          info = merge(info,(;ρin=ρin.arr,ρout=ρout.arr))#in case of χ0 mixing
+          δρ = mix_density(mixing,basis,R; info...)
+          info = merge(info,(;ρin,ρout))#make the density ArrayAndConstraints again
+          δρ = ArrayAndConstraints(δρ,ρout.λ-ρin.λ,ρout.weight)
+
+          ρnext = ρin + T(damping)*δρ
+        else
+          δρ = mix_density(mixing, basis, ρout - ρin ; info...)
+          ρnext = ρin .+ T(damping) .* δρ
+        end
         info = merge(info, (; ρnext))
+        
 
         callback(info)
         converged = is_converged(info)
@@ -169,7 +190,11 @@ Overview of parameters:
     # We do not use the return value of solver but rather the one that got updated by fixpoint_map
     # ψ is consistent with ρout, so we return that. We also perform a last energy computation
     # to return a correct variational energy
-    energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρout, eigenvalues, εF)
+    if typeof(ρout)==ArrayAndConstraints
+      energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρout.arr, eigenvalues, εF,cons_λ=ρout.λ,cons_weight=ρout.weight)
+    else
+      energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρout, eigenvalues, εF)
+    end
 
     # Measure for the accuracy of the SCF
     # TODO probably should be tracked all the way ...

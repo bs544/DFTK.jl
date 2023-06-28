@@ -130,23 +130,31 @@ mutable struct ArrayAndConstraints
     arr         :: Array{Float64,4}
     λ           :: Array{Float64,2} #first dimension for constraints, second defines either spin or charge
     weight      :: Array{Float64,2} #define based on both cons_resid_weight and the unit cell volume
-end
+end    
 
-function ArrayAndConstraints(arr::Array{Float64,4},constraints::Constraints)::ArrayAndConstraints
-    λ = zeros(Float64,length(constraints.cons_vec),2)
+function ArrayAndConstraints(arr::Array{Float64,4},constraints::Vector{Constraint})::ArrayAndConstraints
+    λ = zeros(Float64,length(constraints),2)
     weight = ones(Float64,size(λ))
-    for (i,cons) in enumerate(constraints.cons_vec)
+    for (i,cons) in enumerate(constraints)
         weight[i,:] .*= prod(size(arr)[begin:3])*cons.cons_resid_weight #maybe unit cell volume?
     end
     return ArrayAndConstraints(arr,λ,weight)
 end
 
+ArrayAndConstraints(arr::Array{Float64,4},constraints::Constraints) = ArrayAndConstraints(arr,constraints.cons_vec)
+
+# hoping that these functions allow me to overload the mixing so I can mix density and the lagrange multipliers together
 Base.:+(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr + b.arr,a.λ+b.λ,a.weight)
 Base.:-(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr - b.arr,a.λ-b.λ,a.weight)
 Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.λ .* a.weight))
 LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.λ .* a.weight)
 Base.:*(a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.λ,b.weight)
+Base.eltype(a::ArrayAndConstraints) = Float64
+spin_density(a::ArrayAndConstraints) = spin_density(a.arr)
+# Base.size(a::ArrayAndConstraints) = size(a.arr)
 
+Base.broadcasted(::typeof(+),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.+b.arr,a.λ.+b.λ,a.weight)
+Base.broadcasted(::typeof(*),a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.λ,b.weight)
 # ene_ops(args...;ρ::ArrayAndConstraints,kwargs...) = ene_ops(args...;ρ.arr,kwargs...)
 
 function weight_fn(r::AbstractVector{Float64},cons::Constraint)::Float64
@@ -209,12 +217,17 @@ function integrate_atomic_functions(arr::Array{Float64,3},basis::PlaneWaveBasis,
 end
 
 function residual(ρout::Array,ρin::ArrayAndConstraints,basis::PlaneWaveBasis)::ArrayAndConstraints
+    """
+    define the residual as the the array (ρout-ρin), coupled with the derivative of the energy with respect to 
+    the Lagrange multipliers (∂E/∂λᵢ), which is (Nᵢ - Nᵢᵗᵃʳᵍᵉᵗ), multiplied by some weight
+    """
     constraints = get_constraints(basis)
     arr = ρout - ρin.arr
     weight = ρin.weight
 
     deriv_array = zeros(Float64,size(weight))
     targets = zeros(Float64,size(weight))
+    set_deriv = zeros(Float64,size(weight))
     
     #λ values here are ∂E/∂λᵢ, which is just the deviation of the density from the constraint
     treat_spin = false
@@ -228,7 +241,40 @@ function residual(ρout::Array,ρin::ArrayAndConstraints,basis::PlaneWaveBasis):
         charge_density = ρout
     end
 
-    deriv_array[:,1] = 
+    for (i,cons) in enumerate(constraints.cons_vec)
+        if cons.charge
+            targets[i,1] = cons.target_charge
+            set_deriv[i,1] = 1.0
+        end
+        if cons.spin
+            targets[i,2] = cons.target_spin
+            set_deriv[i,2] = 1.0
+        end
+    end
+
+
+    deriv_array[:,1] = integrate_atomic_functions(charge_density,basis,constraints)-targets[:,1]
+    deriv_array[:,2] = integrate_atomic_functions(spin_density,basis,constraints)  -targets[:,2]
+
+    deriv_array .*= set_deriv #don't do anything with the derivatives of unconstrained values
+
+    t_val = rpad(targets[1,2],10," ")[begin:10]
+    c_val = rpad(deriv_array[1,2]+targets[1,2],13," ")[begin:13]
+    d_val = rpad(deriv_array[1,2],6," ")[begin:6]
+    println("Target Val| Current Val | Deriv")
+    println("-------------------------------")
+    println("$t_val|$c_val|$d_val")
+    println("-------------------------------")
+    R = ArrayAndConstraints(arr,deriv_array,weight)
+
+    return R
+end
+
+# function update_basis_constraints!(basis::PlaneWaveBasis,ρ::ArrayAndConstraints)
+#     """
+#     update the constraints kept in the basis term to reflect the current lagrange multipliers and current values
+#     """
+
 
     
 
