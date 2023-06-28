@@ -151,9 +151,11 @@ LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.λ .* a.weight
 Base.:*(a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.λ,b.weight)
 Base.eltype(a::ArrayAndConstraints) = Float64
 spin_density(a::ArrayAndConstraints) = spin_density(a.arr)
+Base.copy(a::ArrayAndConstraints) = ArrayAndConstraints(a.arr,a.λ,a.weight)
 # Base.size(a::ArrayAndConstraints) = size(a.arr)
 
 Base.broadcasted(::typeof(+),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.+b.arr,a.λ.+b.λ,a.weight)
+Base.broadcasted(::typeof(-),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.-b.arr,a.λ.-b.λ,a.weight)
 Base.broadcasted(::typeof(*),a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.λ,b.weight)
 # ene_ops(args...;ρ::ArrayAndConstraints,kwargs...) = ene_ops(args...;ρ.arr,kwargs...)
 
@@ -262,9 +264,9 @@ function residual(ρout::Array,ρin::ArrayAndConstraints,basis::PlaneWaveBasis):
     c_val = rpad(deriv_array[1,2]+targets[1,2],13," ")[begin:13]
     d_val = rpad(deriv_array[1,2],6," ")[begin:6]
     println("Target Val| Current Val | Deriv")
-    println("-------------------------------")
+    # println("-------------------------------")
     println("$t_val|$c_val|$d_val")
-    println("-------------------------------")
+    # println("-------------------------------")
     R = ArrayAndConstraints(arr,deriv_array,weight)
 
     return R

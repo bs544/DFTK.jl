@@ -18,19 +18,20 @@ function run_iron_constrain()
     model = convert(Model{Float64}, model)
 
     idx = 1
-    resid_weight = 0.00001
+    resid_weight = 1.0
     r_sm_frac = 0.05
-    α = 0.5
+    α = 0.4
+    spin = 0.015
 
 
-    constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=1.4)]
+    constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin)]
     constraint_term = DFTK.DensityMixingConstraints(constraints)
     terms = push!(model.term_types,constraint_term)
     model = Model(model;terms)
 
     
 
-    basis = PlaneWaveBasis(model; Ecut=15, kgrid=[4, 4, 4])
+    basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
     
     cons_infos = []
     energies = []
@@ -38,12 +39,12 @@ function run_iron_constrain()
     V = nothing
     
     ρ0 = guess_density(basis,magnetic_moments)
-    spin = 1.7
-    constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin)]
     ρ0 = ArrayAndConstraints(ρ0,constraints)
     println(ρ0.weight)
 
-    scfres = DFTK.self_consistent_field(basis; tol=1.0e-8,ρ=ρ0,maxiter=100,damping=0.8);
+    solver = scf_damping_solver()
+
+    scfres = DFTK.self_consistent_field(basis; tol=1.0e-8,ρ=ρ0,maxiter=1000,damping=α,solver);
     # constraints= DFTK.get_constraints(basis)
     # spin_density = DFTK.spin_density(scfres.ρ)
     # spins = DFTK.integrate_atomic_functions(spin_density,basis,constraints)

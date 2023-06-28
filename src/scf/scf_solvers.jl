@@ -24,7 +24,7 @@ function scf_damping_solver(β=0.2)
                 break
             end
 
-            x = @. β * x_new + (1 - β) * x
+            x = β .* x_new .+ (1-β) .* x #@. β * x_new + (1 - β) * x
         end
         (; fixpoint=x, converged)
     end
