@@ -227,7 +227,7 @@ function add_resid_constraints(δV::Array{Float64,3},dev_from_target::Vector{Flo
     return δV
 end
 
-function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{Float64,3},constraints::Constraints,is_spin::Bool)
+function add_constraint_to_residual_component(δV::Array{Float64,3},ρ::Array{Float64,3},constraints::Constraints,is_spin::Bool)
     """
     For either the spin or the charge, get the current atomic values, then orthogonalise the residual wrt. the atomic functions and add the difference between the target and current values
     """
@@ -238,10 +238,10 @@ function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{F
         constraints.current_values[:,spin_idx] = current_vals
 
         deriv_array = (current_vals - constraints.target_values[:,spin_idx]).*constraints.is_constrained[:,spin_idx]
-
         δV = orthogonalise_residual(δV,constraints,is_spin)
-        δV = add_resid_constraint!(δV,deriv_array,constraints,spin_idx)
+        δV = add_resid_constraints(δV,deriv_array,constraints,spin_idx)
     end
+    return δV
 end
 
 function display_constraints(constraints::Constraints)
@@ -273,13 +273,13 @@ function add_constraint_to_residual(δV::Array{Float64,4},ρ::Array{Float64,4},c
     ρ_charge = total_density(ρ)
     ρ_spin = spin_density(ρ)
 
-    add_constraint_to_residual_component!(δV_charge,ρ_charge,constraints,false)
-    add_constraint_to_residual_component!(δV_spin,  ρ_spin  ,constraints,true )
+    δV_charge = add_constraint_to_residual_component(δV_charge,ρ_charge,constraints,false)
+    δV_spin   = add_constraint_to_residual_component(δV_spin,  ρ_spin  ,constraints,true )
 
     δV[:,:,:,1] = 0.5.*(δV_charge + δV_spin)
     δV[:,:,:,2] = 0.5.*(δV_charge - δV_spin)
 
-    # display_constraints(constraints.cons_vec)
+    # display_constraints(constraints) #for debugging purposes
     return δV
 end
 

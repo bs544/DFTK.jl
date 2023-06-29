@@ -272,6 +272,9 @@ trial_damping(damping::FixedDamping, args...) = damping.α
         new_E, new_ham = energy_hamiltonian(basis, res_V.ψ, res_V.occupation;
                                             ρ=res_V.ρout, eigenvalues=res_V.eigenvalues,
                                             εF=res_V.εF)
+        # Vout = total_local_potential(new_ham)
+        # delta = Vout-Vin
+        # println(integrate_atomic_functions(delta[:,:,:,1]+delta[:,:,:,2],constraints,1))
         (; basis, ham=new_ham, energies=new_E,
          Vin, Vout=total_local_potential(new_ham), res_V...)
     end
@@ -355,21 +358,7 @@ trial_damping(damping::FixedDamping, args...) = damping.α
             info.occupation_threshold)
 
     if !isnothing(constraints)
-        constraint_info = []
-        for cons in constraints.cons_vec
-            λ_spin = cons.spin ? cons.λ_spin : nothing
-            λ_charge = cons.charge ? cons.λ_charge : nothing
-            
-            target_spin = cons.spin ? cons.target_spin : nothing
-            target_charge = cons.charge ? cons.target_charge : nothing
-
-            current_spin = cons.spin ? cons.current_spin : nothing
-            current_charge = cons.charge ? cons.current_charge : nothing
-
-            atom_idx = cons.atom_idx
-            push!(constraint_info, (; atom_idx, target_spin, target_charge, λ_spin, λ_charge, current_spin, current_charge))
-        end
-        info = merge(info, (; constraint_info))
+        info = merge(info,(;constraints))
     end
     callback(info)
     info

@@ -23,7 +23,7 @@ abstract type Mixing end
 #adding potential residual modification for constrained DFT here
 function mix_potential(mixing, basis, δV, args...; constraints, ρout, kwargs...)
     if !isnothing(constraints)
-        add_constraint_to_residual!(δV,ρout,basis,constraints)
+        δV = add_constraint_to_residual(δV,ρout,constraints)
     end
     mix_density(mixing, basis, δV, args...; ρout, kwargs...)
 end
