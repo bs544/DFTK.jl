@@ -21,11 +21,11 @@ mutable struct Constraint
     r_cut             :: Float64 #smearing width for atomic function
     target_spin       :: Float64
     target_charge     :: Float64
-    current_spin      :: Float64
-    current_charge    :: Float64
+    # current_spin      :: Float64
+    # current_charge    :: Float64
     cons_resid_weight :: Float64
-    λ_charge          :: Float64 #Lagrange multiplier for constraint
-    λ_spin            :: Float64
+    # λ_charge          :: Float64 #Lagrange multiplier for constraint
+    # λ_spin            :: Float64
 end
 
 function Constraint(model::Model,idx::Int,cons_resid_weight::Float64=1.0,r_sm_frac::Float64=0.05;r_cut=nothing,target_spin=nothing,target_charge=nothing)::Constraint
@@ -47,19 +47,47 @@ function Constraint(model::Model,idx::Int,cons_resid_weight::Float64=1.0,r_sm_fr
         charge = false
     end
     @assert charge || spin
-    return Constraint(atom_pos,idx,spin,charge,r_sm,r_cut,target_spin,target_charge, 0.0, 0.0, cons_resid_weight,0.0,0.0)
+    return Constraint(atom_pos,idx,spin,charge,r_sm,r_cut,target_spin,target_charge, cons_resid_weight)
 end
 
 struct Constraints
-    cons_vec    :: Vector{Constraint}
-    overlap     :: Array{Float64,2} #overlap matrix for the different atomic functions
-    overlap_inv :: Array{Float64,2}
+    # make all the constraint information readily accessible, also precompute whatever you can to save on time
+
+    cons_vec      :: Vector{Constraint} #kept if any specific information is needed
+    overlap_charge:: Array{Float64,2}   #overlap matrix for the different atomic functions
+    overlap_spin  :: Array{Float64,2}
+    at_fn_arrays  :: Array{Array{Float64,3},2} # precomputed atomic functions
+    res_wgt_arrs  :: Array{Float64,2}          # weights assigned to the lagrange multiplier updates
+    lambdas       :: Array{Float64,2}          # lagrange multipliers
+    is_constrained:: Array{Int64,2}            # mask for whether a constraint is applied
+    target_values :: Array{Float64,2}          # target values, 0 if unconstrained
+    current_values:: Array{Float64,2}          # current values, 0 if unconstrained
+    dvol          :: Float64                   # just basis.dvol, useful when integrating
 end
 
 function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constraints
-    overlap = calculate_overlap(cons_vec,basis)
-    overlap_inv = inv(overlap)
-    return Constraints(cons_vec,overlap,overlap_inv)
+    atomic_fns = get_at_function_arrays(cons_vec,basis)
+    overlap_charge,overlap_spin = calculate_overlap(atomic_fns,basis.dvol)
+
+    res_wgt_arrs  = zeros(Float64,(length(cons_vec),2))
+    lambdas       = zeros(Float64,(length(cons_vec),2))
+    is_constrained= zeros(Float64,(length(cons_vec),2))
+    target_values = zeros(Float64,(length(cons_vec),2))
+    current_values= zeros(Float64,(length(cons_vec),2))
+
+    for (i,cons) in enumerate(cons_vec)
+        if cons.charge
+            res_wgt_arrs[i,1]   = cons.resid_weight
+            is_constrained[i,1] = 1
+            target_values[i,1]  = cons.target_charge
+        end
+        if cons.spin
+            res_wgt_arrs[i,2]   = cons.resid_weight
+            is_constrained[i,2] = 1
+            target_values[i,2]  = cons.target_spin
+        end
+
+    return Constraints(cons_vec,overlap_charge,overlap_spin,atomic_fns,res_wgt_arrs,lambdas,is_constrained,target_values,current_values,basis.dvol)
 end
 
 function periodic_dist(r::AbstractVector{Float64},basis::PlaneWaveBasis)::Float64
@@ -77,10 +105,6 @@ function periodic_dist(r::AbstractVector{Float64},basis::PlaneWaveBasis)::Float6
     return minimum(red_vector_dists)
 end
 
-
-
-
-
 function weight_fn(r::AbstractVector{Float64},cons::Constraint,basis::PlaneWaveBasis)::Float64
     at_r = periodic_dist(r-cons.atom_pos,basis)
     if at_r > cons.r_cut
@@ -93,131 +117,112 @@ function weight_fn(r::AbstractVector{Float64},cons::Constraint,basis::PlaneWaveB
     end
 end
 
-function calculate_overlap(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Array{Float64,2}
+function get_at_function_arrays(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Array{Array{Float64,3},2}
     """
-    integrate the overlap between the individual atomic weight functions Wᵢⱼ = ∫wᵢ(r)wⱼ(r)d
+    Calculate the weight functions just the once in an effort to speed things up.
     """
-    W_ij = zeros(Float64,length(cons_vec),length(cons_vec))
-    overlap = zeros(Bool,length(cons_vec),length(cons_vec))
     r_vecs = collect(r_vectors_cart(basis))
 
-    #check if there's any overlap
-    for i = 1:length(cons_vec)-1
-        for j = i+1:length(cons_vec)
-            r_ij = cons_vec[i].atom_pos - cons_vec[j].atom_pos
-            dist = sqrt(sum(r_ij.^2))
-            if dist ≤ cons_vec[i].r_cut+cons_vec[j].r_cut
-                overlap[i,j] = 1
-                overlap[j,i] = 1
-            end
-        end
-    end
-
-    #do the diagonal terms either way
+    asize = size(r_vecs)
+    cons_asize = (length(cons_vec),2)
+    weights = [zeros(Float64,asize) for i=1:cons_asize[1], j=1:cons_asize[2]]
     for (i,cons) in enumerate(cons_vec)
-        for r in r_vecs
-            W_ij[i,i] += weight_fn(r,cons,basis)^2
+        w_arr = zeros(Float64,asize)
+        for j in eachindex(r_vecs)
+            w_arr[j] = weight_fn(r_vecs[j],cons,basis)
+        end
+        if cons.charge
+            weights[i,1] = w_arr
+        end
+        if cons.spin
+            weights[i,2] = w_arr
         end
     end
-
-    #if there's no overlap, then that's it. Otherwise add the off diagonal terms as necessary
-    if sum(overlap) != 0
-        for i = 1:length(cons_vec)
-            for j = 1:length(cons_vec)
-                if overlap[i,j]
-                    for r in r_vecs
-                        W_ij[i,j] += weight_fn(r,cons_vec[i],basis)*weight_fn(r,cons_vec[j],basis)
-                    end
-                end
-            end
-        end
-    end
-    return W_ij .* basis.dvol # (basis.model.unit_cell_volume/prod(size(r_vecs)))
+    return weights
 end
+
+function calculate_overlap(atom_fns::Array{Array{Float64,3},2},dvol::Float64)::Tuple{Array{Float64,2},Array{Float64,2}}
+    """
+    If the atomic functions have been committed to arrays, then the integration is a lot cheaper
+    """
+    n_constraint = size(atom_fns)[1]
+    overlap_spin   = zeros(Float64,(n_constraint,n_constraint))
+    overlap_charge = zeros(Float64,(n_constraint,n_constraint))
+    for i = 1:n_constraint
+        for j = i:n_constraint
+            overlap_spin[i,j]   = sum(atom_fns[i,2].*atom_fns[j,2])
+            overlap_charge[i,j] = sum(atom_fns[i,1].*atom_fns[j,1])
+
+            overlap_spin[j,i]   = overlap_spin[i,j]
+            overlap_charge[j,i] = overlap_charge[i,j]
+        end
+    end
+    overlap_spin   .*= dvol
+    overlap_charge .*= dvol
+
+    return overlap_charge,overlap_spin
+
+end
+
+function integrate_atomic_functions(arr::Array{Float64,3},constraints::Constraints,idx::Int)::Vector{Float64}
+    """
+    Use the atomic functions to integrate an array arr
+    """
+    arr_values = Vector{Float64}(undef,length(constraints.cons_vec))
+    for i = 1:length(constraints.cons_vec)
+        arr_values[i] = sum(constraints.at_fn_arrays[i,idx].*arr)*constraints.dvol
+    end
+    return arr_values
+end
+
+function inv_with_zeros(arr::Array{Float64,2})::Array{Float64,2}
+    """
+    When taking the inverse of the overlap matrix, some of the columns and rows will be zero,
+    remove these, then take the inverse and add them back in
+    """
+    nonzero_columns = [i for i = 1:size(arr)[1] if sum(arr[i,:])!=0]
     
-function integrate_atomic_functions(arr::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints)::Vector{Float64}
-    """
-    integrate an array arr and the weight functions of each constraint
-    """
-
-    rvecs = collect(r_vectors_cart(basis))
-
-    spins = zeros(Float64,length(constraints.cons_vec)) #called spins since this is what you get for integrating the spin density
-
-    for (i,cons) in enumerate(constraints.cons_vec)
-        for j in eachindex(rvecs)
-            w = weight_fn(rvecs[j],cons,basis)
-            if w != 0.0
-                spins[i] += w * arr[j]
-            end
+    nonzero_arr = arr[nonzero_columns,nonzero_columns]
+    inv_nonzero = inv(nonzero_arr)
+    inv_arr = zeros(Float64,size(arr))
+    for (i,idx) in enumerate(nonzero_columns)
+        for (j,jdx) in enumerate(nonzero_columns)
+            inv_arr[idx,jdx] = inv_nonzero[i,j]
         end
     end
-
-    spins .*= basis.dvol #basis.model.unit_cell_volume / prod(size(rvecs))
-    return spins
+    return inv_arr
 end
 
-function orthogonalise_residual!(δV::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints,is_spin::Bool)
+function orthogonalise_residual!(δV::Array{Float64,3},constraints::Constraints,is_spin::Bool)
     """
     Orthogonalise the residual with respect to the atomic weight functions
         δV = δV -  ∑ᵢ wᵢ(r) ∑ⱼ (W)ᵢⱼ⁻¹∫δV(r')wⱼ(r')dr'
     """
-
-    rvecs = collect(r_vectors_cart(basis))
-
-    δV_w_i = integrate_atomic_functions(δV,basis,constraints)
-
-    to_be_multiplied_by_weights = constraints.overlap_inv*δV_w_i
-
-    for (i,cons) in enumerate(constraints.cons_vec)
-        for j in CartesianIndices(rvecs)
-            δV[j] -=  weight_fn(rvecs[j],cons,basis)*to_be_multiplied_by_weights[i]
-        end
-        if is_spin
-            cons.λ_spin = to_be_multiplied_by_weights[i]
-        else
-            cons.λ_charge = to_be_multiplied_by_weights[i]
-        end
+    if is_spin
+        spin_idx = 2
+        overlap_inv = inv_with_zeros(constraints.overlap_spin)
+    else
+        spin_idx = 1
+        overlap_inv = inv_with_zeros(constraints.overlap_charge)
     end
-end      
+    residual_atomic_components = integrate_atomic_functions(δV,constraints.at_fn_arrays,spin_idx)
+    to_be_multiplied_by_weights = overlap_inv*residual_atomic_components
 
-function add_resid_constraints!(δV::Array{Float64,3},dev_from_target::Vector{Float64},constraints::Constraints,basis::PlaneWaveBasis)
-    """
-    The part that's added to the residual is ∑ᵢ cᵢ wᵢ(r) ∑ⱼ(W)⁻¹ᵢⱼ (Nⱼ-Nⱼᵗ)
-    """
-    rvecs = collect(r_vectors_cart(basis))
-    W_ij = constraints.overlap_inv
-    for (i,cons) in enumerate(constraints.cons_vec)
-        factor = cons.cons_resid_weight*(W_ij[i,:]⋅dev_from_target)    
-        for j in CartesianIndices(rvecs)
-            δV[j] += weight_fn(rvecs[j],cons,basis)*factor
-        end
+    for i = 1:length(constraints.cons_vec)
+        δV -= constraints.at_fn_arrays[i,spin_idx].*to_be_multiplied_by_weights[i]
+        constraints.lambdas[i,spin_idx] = to_be_multiplied_by_weights[i]
     end
 end
 
-function get_spin_charge_constraints(constraints::Constraints,is_spin::Bool)::Constraints
+function add_resid_constraints!(δV::Array{Float64,3},dev_from_target::Vector{Float64},constraints::Constraints,spin_idx::Int)
     """
-    Remove the constraints that don't constrain the specified variable (either charge or spin) defined by is_spin
-    Modify the overlap matrix and the inverse overlap matrix to account as needed for the given 
+    The part that's added to the residual is ∑ᵢ cᵢ wᵢ(r) ∑ⱼ(W)⁻¹ᵢⱼ (Nⱼ-Nⱼᵗ)
     """
-    
-    relevant_constraints = Vector{Int}(undef,0)
-    relevant_cons_vec = Vector{Constraint}(undef,0)
+    overlap_inv = spin_idx==1 ? inv_with_zeros(constraints.overlap_charge) : inv_with_zeros(constraints.overlap_spin)
     for (i,cons) in enumerate(constraints.cons_vec)
-        if (is_spin && cons.spin) || (!is_spin && cons.charge)
-            push!(relevant_constraints,i)
-            push!(relevant_cons_vec,cons)
-        end
+        factor = constraints.weights[i,spin_idx]*(overlap_inv[i,:]⋅dev_from_target)
+        δV += constraints.at_fn_arrays[i,spin_idx].*factor
     end
-    if length(relevant_cons_vec)>0
-        relevant_overlap = constraints.overlap[relevant_constraints,relevant_constraints]
-        relevant_overlap_inv = inv(relevant_overlap)
-    else
-        relevant_overlap = Array{Float64,2}(undef,0,0)
-        relevant_overlap_inv = Array{Float64,2}(undef,0,0)
-    end
-    new_constraints = Constraints(relevant_cons_vec,relevant_overlap,relevant_overlap_inv)
-    return new_constraints
 end
 
 function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints,is_spin::Bool)
