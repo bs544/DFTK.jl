@@ -77,15 +77,16 @@ function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constr
 
     for (i,cons) in enumerate(cons_vec)
         if cons.charge
-            res_wgt_arrs[i,1]   = cons.resid_weight
+            res_wgt_arrs[i,1]   = cons.cons_resid_weight
             is_constrained[i,1] = 1
             target_values[i,1]  = cons.target_charge
         end
         if cons.spin
-            res_wgt_arrs[i,2]   = cons.resid_weight
+            res_wgt_arrs[i,2]   = cons.cons_resid_weight
             is_constrained[i,2] = 1
             target_values[i,2]  = cons.target_spin
         end
+    end
 
     return Constraints(cons_vec,overlap_charge,overlap_spin,atomic_fns,res_wgt_arrs,lambdas,is_constrained,target_values,current_values,basis.dvol)
 end
@@ -193,7 +194,7 @@ function inv_with_zeros(arr::Array{Float64,2})::Array{Float64,2}
     return inv_arr
 end
 
-function orthogonalise_residual!(δV::Array{Float64,3},constraints::Constraints,is_spin::Bool)
+function orthogonalise_residual(δV::Array{Float64,3},constraints::Constraints,is_spin::Bool)
     """
     Orthogonalise the residual with respect to the atomic weight functions
         δV = δV -  ∑ᵢ wᵢ(r) ∑ⱼ (W)ᵢⱼ⁻¹∫δV(r')wⱼ(r')dr'
@@ -205,24 +206,25 @@ function orthogonalise_residual!(δV::Array{Float64,3},constraints::Constraints,
         spin_idx = 1
         overlap_inv = inv_with_zeros(constraints.overlap_charge)
     end
-    residual_atomic_components = integrate_atomic_functions(δV,constraints.at_fn_arrays,spin_idx)
+    residual_atomic_components = integrate_atomic_functions(δV,constraints,spin_idx)
     to_be_multiplied_by_weights = overlap_inv*residual_atomic_components
-
     for i = 1:length(constraints.cons_vec)
         δV -= constraints.at_fn_arrays[i,spin_idx].*to_be_multiplied_by_weights[i]
         constraints.lambdas[i,spin_idx] = to_be_multiplied_by_weights[i]
     end
+    return δV
 end
 
-function add_resid_constraints!(δV::Array{Float64,3},dev_from_target::Vector{Float64},constraints::Constraints,spin_idx::Int)
+function add_resid_constraints(δV::Array{Float64,3},dev_from_target::Vector{Float64},constraints::Constraints,spin_idx::Int)
     """
     The part that's added to the residual is ∑ᵢ cᵢ wᵢ(r) ∑ⱼ(W)⁻¹ᵢⱼ (Nⱼ-Nⱼᵗ)
     """
     overlap_inv = spin_idx==1 ? inv_with_zeros(constraints.overlap_charge) : inv_with_zeros(constraints.overlap_spin)
     for (i,cons) in enumerate(constraints.cons_vec)
-        factor = constraints.weights[i,spin_idx]*(overlap_inv[i,:]⋅dev_from_target)
+        factor = constraints.res_wgt_arrs[i,spin_idx]*(overlap_inv[i,:]⋅dev_from_target)
         δV += constraints.at_fn_arrays[i,spin_idx].*factor
     end
+    return δV
 end
 
 function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{Float64,3},constraints::Constraints,is_spin::Bool)
@@ -237,8 +239,8 @@ function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{F
 
         deriv_array = (current_vals - constraints.target_values[:,spin_idx]).*constraints.is_constrained[:,spin_idx]
 
-        orthogonalise_residual!(δV,constraints,is_spin)
-        add_resid_constraints!(δV,deriv_array,constraints,spin_idx)
+        δV = orthogonalise_residual(δV,constraints,is_spin)
+        δV = add_resid_constraint!(δV,deriv_array,constraints,spin_idx)
     end
 end
 
@@ -263,7 +265,7 @@ function display_constraints(constraints::Constraints)
     end
 end
 
-function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},constraints::Constraints)
+function add_constraint_to_residual(δV::Array{Float64,4},ρ::Array{Float64,4},constraints::Constraints)
 
     δV_charge = δV[:,:,:,1]+δV[:,:,:,2]
     δV_spin   = δV[:,:,:,1]-δV[:,:,:,2]
@@ -278,6 +280,7 @@ function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},
     δV[:,:,:,2] = 0.5.*(δV_charge - δV_spin)
 
     # display_constraints(constraints.cons_vec)
+    return δV
 end
 
 
