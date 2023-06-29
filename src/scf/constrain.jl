@@ -225,53 +225,45 @@ function add_resid_constraints!(δV::Array{Float64,3},dev_from_target::Vector{Fl
     end
 end
 
-function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{Float64,3},basis::PlaneWaveBasis,constraints::Constraints,is_spin::Bool)
+function add_constraint_to_residual_component!(δV::Array{Float64,3},ρ::Array{Float64,3},constraints::Constraints,is_spin::Bool)
+    """
+    For either the spin or the charge, get the current atomic values, then orthogonalise the residual wrt. the atomic functions and add the difference between the target and current values
+    """
+    spin_idx = is_spin ? 2 : 1
+    if sum(constraints.is_constrained[:,spin_idx]) > 0
+        current_vals = integrate_atomic_functions(ρ,constraints,spin_idx)
 
-    tmp_constraints = get_spin_charge_constraints(constraints,is_spin)
-    if length(tmp_constraints.cons_vec)>0
-        current_vals = integrate_atomic_functions(ρ,basis,tmp_constraints)
+        constraints.current_values[:,spin_idx] = current_vals
 
-        # if is_spin
-        #     current_vals .*= 2.0 #multiply by 2 to get it in Bohr Magnetons
-        # end
+        deriv_array = (current_vals - constraints.target_values[:,spin_idx]).*constraints.is_constrained[:,spin_idx]
 
-        for (i,cons) in enumerate(tmp_constraints.cons_vec)
-            if is_spin
-                cons.current_spin = current_vals[i]
-                current_vals[i] -= cons.target_spin
-            else
-                cons.current_charge = current_vals[i]
-                current_vals[i] -= cons.target_charge
-            end
-        end
-
-        orthogonalise_residual!(δV,basis,tmp_constraints,is_spin)
-        add_resid_constraints!(δV,current_vals,tmp_constraints,basis)
+        orthogonalise_residual!(δV,constraints,is_spin)
+        add_resid_constraints!(δV,deriv_array,constraints,spin_idx)
     end
 end
 
-function display_constraints(constraints::Vector{Constraint})
+function display_constraints(constraints::Constraints)
 
     println("Atom idx  |  Constraint Type  |  λ     |  Current Value  |  Target Value ")
     println("-------------------------------------------------------------------------")
-    for cons in constraints
+    for (i,cons) in enumerate(constraints.cons_vec)
         idx = rpad(cons.atom_idx,9," ")
         if cons.spin
-            λ = rpad(cons.λ_spin,6," ")[begin:6]
-            current = rpad(cons.current_spin,15," ")[begin:15]
-            target = rpad(cons.target_spin,13," ")[begin:13]
+            λ = rpad(constraints.lambdas[i,2],6," ")[begin:6]
+            current = rpad(constraints.current_values[i,2],15," ")[begin:15]
+            target = rpad(constraints.target_values[i,2],13," ")[begin:13]
             println(" $idx|  spin             |  $λ|  $current|  $target")
         end
         if cons.charge
-            λ = rpad(cons.λ_charge,6," ")[begin:6]
-            current = rpad(cons.current_charge,15," ")[begin:15]
-            target = rpad(cons.target_charge,13," ")[begin:13]
+            λ = rpad(constraints.lambdas[i,1],6," ")[begin:6]
+            current = rpad(constraints.current_values[i,1],15," ")[begin:15]
+            target = rpad(constraints.target_values[i,1],13," ")[begin:13]
             println(" $idx|  charge           |  $λ|  $current|  $target")
         end
     end
 end
 
-function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4}, basis::PlaneWaveBasis,constraints::Constraints)
+function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},constraints::Constraints)
 
     δV_charge = δV[:,:,:,1]+δV[:,:,:,2]
     δV_spin   = δV[:,:,:,1]-δV[:,:,:,2]
@@ -279,8 +271,8 @@ function add_constraint_to_residual!(δV::Array{Float64,4},ρ::Array{Float64,4},
     ρ_charge = total_density(ρ)
     ρ_spin = spin_density(ρ)
 
-    add_constraint_to_residual_component!(δV_charge,ρ_charge,basis,constraints,false)
-    add_constraint_to_residual_component!(δV_spin,  ρ_spin  ,basis,constraints,true )
+    add_constraint_to_residual_component!(δV_charge,ρ_charge,constraints,false)
+    add_constraint_to_residual_component!(δV_spin,  ρ_spin  ,constraints,true )
 
     δV[:,:,:,1] = 0.5.*(δV_charge + δV_spin)
     δV[:,:,:,2] = 0.5.*(δV_charge - δV_spin)
