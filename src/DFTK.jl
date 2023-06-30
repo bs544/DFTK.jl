@@ -81,6 +81,11 @@ include("orbitals.jl")
 include("show.jl")
 include("supercell.jl")
 
+export Constraint
+export Constraints
+export ArrayAndConstraints
+include("constraint_types.jl")
+
 export Energies
 include("Energies.jl")
 
