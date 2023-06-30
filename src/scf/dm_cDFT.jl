@@ -80,7 +80,6 @@ which is done within a combined struct ArrayAndConstraints
         ψ, eigenvalues, occupation, εF, ρout = nextstate
 
         resid = residual(ρout,ρin_cons,basis)
-        println(resid.lambdas)
         ρout_cons = resid + ρin_cons
 
         # Update info with results gathered so far
@@ -119,17 +118,19 @@ which is done within a combined struct ArrayAndConstraints
     # ψ is consistent with ρout, so we return that. We also perform a last energy computation
     # to return a correct variational energy
     energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρout_cons.arr, eigenvalues, εF, 
-                                       ρout_cons.lambdas, ρout_cons.weights)
+                                       cons_lambdas=ρout_cons.lambdas, cons_weights=ρout_cons.weights)
 
     # Measure for the accuracy of the SCF
     # TODO probably should be tracked all the way ...
     norm_Δρ = norm(info.ρout_cons - info.ρin_cons) * sqrt(basis.dvol)
 
+    constraints= get_constraints(basis)
+
     # Callback is run one last time with final state to allow callback to clean up
     info = (; ham, basis, energies, converged, nbandsalg.occupation_threshold,
             ρ=ρout, α=damping, eigenvalues, occupation, εF, info.n_bands_converge,
             n_iter, ψ, info.diagonalization, stage=:finalize,
-            algorithm="SCF", norm_Δρ)
+            algorithm="SCF", norm_Δρ,constraints)
     callback(info)
     info
 end
