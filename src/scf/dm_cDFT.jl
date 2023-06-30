@@ -1,8 +1,3 @@
-include("scf_callbacks.jl")
-
-
-
-
 @doc raw"""
     density_mixed_constrained(basis; [tol, mixing, damping, ρ, ψ])
 
@@ -72,9 +67,7 @@ which is done within a combined struct ArrayAndConstraints
         converged && return ρin_cons  # No more iterations if convergence flagged
         n_iter += 1
 
-        ρin          = ρin_cons.arr
-        cons_λ       = ρin_cons.lambdas
-        cons_weights = ρin_cons.weights
+        ρin = ρin_cons.arr
 
         # Note that ρin is not the density of ψ, and the eigenvalues
         # are not the self-consistent ones, which makes this energy non-variational
@@ -86,8 +79,9 @@ which is done within a combined struct ArrayAndConstraints
                                  occupation, miniter=1, tol=determine_diagtol(info))
         ψ, eigenvalues, occupation, εF, ρout = nextstate
 
-        resid = residual(ρout,ρin)
-        ρout_cons = resid + ρin
+        resid = residual(ρout,ρin_cons,basis)
+        println(resid.lambdas)
+        ρout_cons = resid + ρin_cons
 
         # Update info with results gathered so far
         info = (; ham, basis, converged, stage=:iterate, algorithm="SCF",
@@ -105,8 +99,8 @@ which is done within a combined struct ArrayAndConstraints
 
         # Apply mixing and pass it the full info as kwargs
         δρ = mix_density(mixing, basis, ρout - ρin; info...)
-        δρ = ArrayAndCosntraints(δρ,resid.lambdas,resid.weights)
-        ρnext_cons = ρin_cons .+ T(damping) .* δρ
+        δρ_cons = ArrayAndConstraints(δρ,resid.lambdas,resid.weights)
+        ρnext_cons = ρin_cons .+ T(damping) .* δρ_cons
         info = merge(info, (; ρnext_cons))
 
         callback(info)

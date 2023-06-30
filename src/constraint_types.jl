@@ -197,8 +197,8 @@ ArrayAndConstraints(arr::AbstractArray,basis::PlaneWaveBasis) = ArrayAndConstrai
 #overloading functions needed for the mixing of the density so that it includes the residual
 Base.:+(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr + b.arr,a.lambdas+b.lambdas,a.weights)
 Base.:-(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr - b.arr,a.lambdas-b.lambdas,a.weights)
-Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.lambdas .* a.weights))
-LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.lambdas .* a.weights)
+Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.lambdas))# .* a.weights))
+LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.lambdas)# .* a.weights)
 Base.:*(a::Number,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
 Base.eltype(a::ArrayAndConstraints) = eltype(a.arr)
 spin_density(a::ArrayAndConstraints) = spin_density(a.arr)
@@ -211,6 +211,19 @@ Base.broadcastable(a::ArrayAndConstraints) = Ref(a) #this may cause problems lat
 # Base.broadcasted(::typeof(-),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.-b.arr,a.lambdas.-b.lambdas,a.weights)
 # Base.broadcasted(::typeof(*),a::Number,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
 
+
+function back_to_array(x_new::Vector{Float64},x_old::ArrayAndConstraints)::ArrayAndConstraints
+    """
+    My attempt to crowbar in the ArrayAndConstraints into the anderson acceleration
+    This is to replace the initial "reshape(xₙ₊₁, size(xₙ))"
+    """
+    arr_length = prod(size(x_old.arr))
+    x_new_arr = reshape(x_new[begin:arr_length],size(x_old.arr))
+    x_new_weight = x_old.weights
+    x_new_λ = reshape(x_new[arr_length+1:end],size(x_old.lambdas))
+    # x_new_λ ./= x_new_weight
+    return ArrayAndConstraints(x_new_arr,x_new_λ,x_new_weight)
+end
 
 function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBasis)::ArrayAndConstraints
     """
@@ -235,6 +248,8 @@ function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBa
     constraints.current_values[:,2] = spins
 
     deriv_array = constraints.current_values-constraints.target_values
+
+    deriv_array .*= ρin_cons.weights
 
     weights  = constraints.res_wgt_arrs
 

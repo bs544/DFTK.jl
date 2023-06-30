@@ -67,7 +67,7 @@ function (anderson::AndersonAcceleration)(xₙ, αₙ, Pfxₙ)
     end
 
     push!(anderson, xₙ, αₙ, Pfxₙ)
-    reshape(xₙ₊₁, size(xₙ))
+    back_to_array(xₙ₊₁,xₙ) # reshape(xₙ₊₁, size(xₙ))
 end
 
 function ScfAcceptStepAll()
