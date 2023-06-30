@@ -190,24 +190,24 @@ mutable struct ArrayAndConstraints
     weights :: AbstractArray{Float64,2}
 end
 
-ArrayAndConstraints(arr::AbstractArray,constraints::Constraints) = ArrayAndConstraints(arr,constraints.lambdas,constraints.res_wgt_arrs)
+ArrayAndConstraints(arr::AbstractArray,constraints::Constraints) = ArrayAndConstraints(arr,constraints.lambdas,constraints.res_wgt_arrs/constraints.dvol)
 
 ArrayAndConstraints(arr::AbstractArray,basis::PlaneWaveBasis) = ArrayAndConstraints(arr,get_constraints(basis))
 
 #overloading functions needed for the mixing of the density so that it includes the residual
-Base.:+(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr + b.arr,a.lambdas+b.lambdas,a.weight)
-Base.:-(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr - b.arr,a.lambdas-b.lambdas,a.weight)
-Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.lambdas .* a.weight))
-LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.lambdas .* a.weight)
-Base.:*(a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weight)
+Base.:+(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr + b.arr,a.lambdas+b.lambdas,a.weights)
+Base.:-(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr - b.arr,a.lambdas-b.lambdas,a.weights)
+Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.lambdas .* a.weights))
+LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.lambdas .* a.weights)
+Base.:*(a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
 Base.eltype(a::ArrayAndConstraints) = eltype(a.arr)
 spin_density(a::ArrayAndConstraints) = spin_density(a.arr)
-Base.copy(a::ArrayAndConstraints) = ArrayAndConstraints(a.arr,a.lambdas,a.weight)
+Base.copy(a::ArrayAndConstraints) = ArrayAndConstraints(a.arr,a.lambdas,a.weights)
 # Base.size(a::ArrayAndConstraints) = size(a.arr)
 
-Base.broadcasted(::typeof(+),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.+b.arr,a.lambdas.+b.lambdas,a.weight)
-Base.broadcasted(::typeof(-),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.-b.arr,a.lambdas.-b.lambdas,a.weight)
-Base.broadcasted(::typeof(*),a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weight)
+Base.broadcasted(::typeof(+),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.+b.arr,a.lambdas.+b.lambdas,a.weights)
+Base.broadcasted(::typeof(-),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.-b.arr,a.lambdas.-b.lambdas,a.weights)
+Base.broadcasted(::typeof(*),a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
 
 
 function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBasis)::ArrayAndConstraints
