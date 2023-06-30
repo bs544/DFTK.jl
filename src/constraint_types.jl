@@ -199,15 +199,17 @@ Base.:+(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.ar
 Base.:-(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr - b.arr,a.lambdas-b.lambdas,a.weights)
 Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.lambdas .* a.weights))
 LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.lambdas .* a.weights)
-Base.:*(a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
+Base.:*(a::Number,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
 Base.eltype(a::ArrayAndConstraints) = eltype(a.arr)
 spin_density(a::ArrayAndConstraints) = spin_density(a.arr)
 Base.copy(a::ArrayAndConstraints) = ArrayAndConstraints(a.arr,a.lambdas,a.weights)
 # Base.size(a::ArrayAndConstraints) = size(a.arr)
 
-Base.broadcasted(::typeof(+),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.+b.arr,a.lambdas.+b.lambdas,a.weights)
-Base.broadcasted(::typeof(-),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.-b.arr,a.lambdas.-b.lambdas,a.weights)
-Base.broadcasted(::typeof(*),a::Float64,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
+#turns out you don't need to overload the broadcasting bits if you specify your type as an effective scalar with the following
+Base.broadcastable(a::ArrayAndConstraints) = Ref(a) #this may cause problems later on, but works for now
+# Base.broadcasted(::typeof(+),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.+b.arr,a.lambdas.+b.lambdas,a.weights)
+# Base.broadcasted(::typeof(-),a::ArrayAndConstraints,b::ArrayAndConstraints) = ArrayAndConstraints(a.arr.-b.arr,a.lambdas.-b.lambdas,a.weights)
+# Base.broadcasted(::typeof(*),a::Number,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
 
 
 function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBasis)::ArrayAndConstraints
