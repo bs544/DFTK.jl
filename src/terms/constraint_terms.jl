@@ -47,6 +47,12 @@ end
     #update the constraints
     term.constraints.lambdas = cons_lambdas
 
+    current_charges = integrate_atomic_functions(total_density(ρ),term.constraints,1)
+    current_spins   = integrate_atomic_functions(spin_density(ρ) ,term.constraints,2)
+
+    term.constraints.current_values[:,1] = current_charges
+    term.constraints.current_values[:,2] = current_spins
+
     charge_pot_mod = zeros(Float64,size(term.constraints.at_fn_arrays[1,1]))
     spin_pot_mod   = zeros(Float64,size(term.constraints.at_fn_arrays[1,1]))
 
@@ -73,7 +79,8 @@ end
     ops = [RealSpaceMultiplication(basis,kpt,pot_mod[:,:,:,kpt.spin])
            for kpt in basis.kpoints]
     
-    E = sum(ρ.*pot_mod) * term.constraints.dvol
+    # E = sum(ρ.*pot_mod) * term.constraints.dvol
+    E = sum(term.constraints.lambdas .* (term.constraints.current_values-term.constraints.target_values))
 
     (; E, ops)
 

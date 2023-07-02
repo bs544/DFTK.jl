@@ -225,6 +225,8 @@ function back_to_array(x_new::Vector{Float64},x_old::ArrayAndConstraints)::Array
     return ArrayAndConstraints(x_new_arr,x_new_λ,x_new_weight)
 end
 
+back_to_array(x_new::AbstractVector,x_old::AbstractArray) = reshape(x_new,size(x_old))
+
 function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBasis)::ArrayAndConstraints
     """
     Define the residual to include the gradient of the energy with respect to the lagrange multipliers
@@ -249,7 +251,9 @@ function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBa
 
     deriv_array = constraints.current_values-constraints.target_values
 
-    deriv_array .*= ρin_cons.weights
+    # this should be the only place that the weights are needed.
+    # It acts effectively as a step size for the Lagrange multiplier update
+    deriv_array .*= ρin_cons.weights 
 
     weights  = constraints.res_wgt_arrs
 
