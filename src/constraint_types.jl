@@ -15,11 +15,7 @@ struct Constraint
     r_cut             :: Float64 #smearing width for atomic function
     target_spin       :: Float64
     target_charge     :: Float64
-    # current_spin      :: Float64
-    # current_charge    :: Float64
     cons_resid_weight :: Float64
-    # λ_charge          :: Float64 #Lagrange multiplier for constraint
-    # λ_spin            :: Float64
 end
 
 function Constraint(model::Model,idx::Int,cons_resid_weight::Float64=1.0,r_sm_frac::Float64=0.05;r_cut=nothing,target_spin=nothing,target_charge=nothing)::Constraint

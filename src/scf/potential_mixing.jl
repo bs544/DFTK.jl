@@ -355,7 +355,7 @@ trial_damping(damping::FixedDamping, args...) = damping.α
     info = (; ham, basis, info.energies, converged, ρ=info.ρout, info.eigenvalues,
             info.occupation, info.εF, n_iter, info.ψ, info.n_bands_converge,
             info.diagonalization, stage=:finalize, algorithm="SCF",
-            info.occupation_threshold)
+            info.occupation_threshold, Vin=info.Vin)
 
     if !isnothing(constraints)
         info = merge(info,(;constraints))

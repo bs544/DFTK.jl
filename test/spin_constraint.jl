@@ -8,7 +8,7 @@ function run_iron_constrain()
     Fe = ElementPsp(iron_bcc.atnum, psp=load_psp("hgh/lda/Fe-q8.hgh"))
     atoms, positions = [Fe,Fe], [zeros(3),0.5.*ones(3)]
     magnetic_moments = [2.0,2.0]
-    a = 5.42352*0.99
+    a = 5.42352
     lattice = a .* [1.0 0.0 0.0;
                     0.0 1.0 0.0;
                     0.0 0.0 1.0]
@@ -20,31 +20,33 @@ function run_iron_constrain()
     resid_weight = 1.0
     r_sm_frac = 0.1
     r_cut = 2.0
-    α = 0.5
+    α = 0.8
+    idx = 1
 
-    basis = PlaneWaveBasis(model; Ecut=15, kgrid=[4, 4, 4])
+
+    basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
     
     cons_infos = []
     energies = []
     n_steps = []
     V = nothing
     ρ0 = guess_density(basis,magnetic_moments)
-    for spin in 1.6:0.1:2.0
-        constraints = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,r_cut),DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+    for spin in 1.5:0.1:2.7
+        constraints = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
         
         scfres = DFTK.scf_potential_mixing(basis; tol=1.0e-8,ρ=ρ0,V=V,constraints=constraints,maxiter=100,damping=DFTK.FixedDamping(α));
-        push!(cons_infos,scfres.constraint_info)
+        push!(cons_infos,scfres.constraints)
         push!(energies,scfres.energies.total)
         push!(n_steps,scfres.n_iter)
-        V = DFTK.total_local_potential(scfres.ham)
-        ρ0 = scfres.ρ
+        # V = DFTK.total_local_potential(scfres.ham)
+        # ρ0 = scfres.ρ
     end
     println("The zero for λ should correspond to the energy minimum")
     for (i,info) in enumerate(cons_infos)
-        λ_string  = string(info[1].λ_spin)
+        λ_string  = string(info.lambdas[1,2])
         e_string  = string(energies[i]-energies[1])
-        st_string = string(info[1].target_spin)
-        sv_string = string(info[1].current_spin)
+        st_string = string(info.target_values[1,2])
+        sv_string = string(info.current_values[1,2])
         
         λ_string  = λ_string[begin:min(length(λ_string),7)]
         e_string  = e_string[begin:min(length(e_string),7)]
