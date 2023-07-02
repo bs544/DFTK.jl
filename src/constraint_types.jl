@@ -1,5 +1,6 @@
 """
-Define constraint structs that are used in both the Hamiltonian terms as well as any mixing stuff
+Define constraint structs that are used in both the Hamiltonian terms
+These terms are needed when performing constrained DFT within the density mixing approach
 """
 
 struct Constraint
