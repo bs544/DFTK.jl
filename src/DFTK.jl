@@ -151,6 +151,7 @@ export direct_minimization
 export newton
 export load_scfres, save_scfres
 export density_mixed_constrained
+export innerloop
 include("scf/chi0models.jl")
 include("scf/constrain.jl")
 include("scf/mixing.jl")
@@ -162,6 +163,7 @@ include("scf/newton.jl")
 include("scf/scfres.jl")
 include("scf/potential_mixing.jl")
 include("scf/dm_cDFT.jl")
+include("scf/constraint_innerloop.jl")
 
 export symmetry_operations
 export standardize_atoms

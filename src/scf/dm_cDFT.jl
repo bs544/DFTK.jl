@@ -43,6 +43,7 @@ which is done within a combined struct ArrayAndConstraints
     fermialg::AbstractFermiAlgorithm=default_fermialg(basis.model),
     callback=ScfDefaultCallback(; show_damping=false),
     compute_consistent_energies=true,
+    initial_lambdas=nothing,
     response=ResponseOptions(),  # Dummy here, only for AD
 ) where {T}
     # All these variables will get updated by fixpoint_map
@@ -112,6 +113,9 @@ which is done within a combined struct ArrayAndConstraints
     # Tolerance and maxiter are only dummy here: Convergence is flagged by is_converged
     # inside the fixpoint_map.
     ρout_cons = ArrayAndConstraints(ρout,basis)
+    if !isnothing(initial_lambdas)
+      ρout_cons.lambdas = initial_lambdas
+    end
     solver(fixpoint_map, ρout_cons, maxiter; tol=eps(T))
 
     # We do not use the return value of solver but rather the one that got updated by fixpoint_map
