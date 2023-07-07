@@ -80,7 +80,7 @@ end
            for kpt in basis.kpoints]
     
     # E = sum(ρ.*pot_mod) * term.constraints.dvol
-    E = sum(term.constraints.lambdas .* (term.constraints.current_values-term.constraints.target_values))
+    E = sum(term.constraints.lambdas .* (term.constraints.current_values-term.constraints.target_values))*2#*-11.5
 
     (; E, ops)
 

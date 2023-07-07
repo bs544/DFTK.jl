@@ -4,6 +4,13 @@ This is done by defining functions that give E and ∂E/∂λᵢ and plugging th
 The point of this is to provide a comparison between inner loop methods and the density mixing cDFT implementation
 """
 
+function lambdas_second_deriv(λ,constraints::Constraints,basis::PlaneWaveBasis,ρ;weights,ψ,occupation,εF,eigenvalues,eigensolver=lobpcg_hyper,nbandsalg,fermialg,tol)
+    """
+    Generate the second derivative of constrained energy W with respect to the lagrange multipliers, according to the paper by O'Regan and Teobaldi (https://journals.aps.org/prb/abstract/10.1103/PhysRevB.94.035159)
+    This involves finding the susceptibility χ and integrating it with respect to the weights: Hᵢⱼ = ∫wᵢ(𝐫)χ(𝐫,𝐫')wⱼ(𝐫)d𝐫d𝐫'
+    """
+end
+
 function lambdas_2_vector(lambdas,constraints::Constraints)
     """
     For the purposes of minimisation, the lambdas array needs to be a vector of only the elements that are being constrained
@@ -42,15 +49,14 @@ function energy_from_lagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,
     then diagonalise the hamiltonian with next_density
     use the outputs of the diagonalisation to get the energy
     """
-    # lambdas = vector_2_lambdas(λ,constraints)
-    # ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas, cons_weights=weights).ham
-    # ψ, eigenvalues, occupation, εF, ρout = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
-    #                                                     occupation, miniter=1, tol)
-    # E = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF,cons_lambdas=lambdas,cons_weights=weights).energies
-    # println(fieldnames(E))
-    # return E.total
-    grad = lagrange_gradient(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,nbandsalg,fermialg,tol,eigensolver,constraints)
-    return dot(grad,grad)
+    lambdas = vector_2_lambdas(λ,constraints)
+    ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas, cons_weights=weights).ham
+    ψ, eigenvalues, occupation, εF, ρout = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
+                                                        occupation, miniter=1, tol)
+    E = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF,cons_lambdas=lambdas,cons_weights=weights).energies
+    return E#.total
+    # grad = lagrange_gradient(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,nbandsalg,fermialg,tol,eigensolver,constraints)
+    # return dot(grad,grad)
 end
 
 function lagrange_gradient(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,nbandsalg,fermialg,tol,eigensolver=lobpcg_hyper,constraints)
@@ -94,7 +100,7 @@ function innerloop(ρ_cons::ArrayAndConstraints,basis,nbandsalg,fermialg,diagtol
                                    iterations=max_cons_iter,show_trace=true,inplace=false,x_tol=λ_tol)
     new_lambdas= Optim.x_trace(optim_results)[end]
 
-    # println(optim_results)
+    println(optim_results)
     # println(Optim.x_trace(optim_results))
     return vector_2_lambdas(new_lambdas,constraints)
 end
