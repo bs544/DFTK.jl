@@ -49,7 +49,7 @@ mutable struct Constraints
     overlap_spin  :: Array{Float64,2}
     at_fn_arrays  :: Array{Array{Float64,3},2} # precomputed atomic functions
     res_wgt_arrs  :: Array{Float64,2}          # weights assigned to the lagrange multiplier updates
-    lambdas       :: Array{Float64,2}          # lagrange multipliers
+    lambdas       :: Array{Number,2}           # lagrange multipliers, setting as number for ForwardDiff
     is_constrained:: Array{Int64,2}            # mask for whether a constraint is applied
     target_values :: Array{Float64,2}          # target values, 0 if unconstrained
     current_values:: Array{Float64,2}          # current values, 0 if unconstrained
@@ -175,6 +175,26 @@ function get_constraints(basis::PlaneWaveBasis)::Constraints
     end
     return nothing
 end
+
+function get_4d_at_fns(constraints::Constraints)
+    """
+    For each constraint get the representation of it in the spin up spin down representation,
+    this is needed when applying χ0 to the atomic functions for the inner loop calculations
+    """
+    at_fn_arrs = Array{Array{Float64,4},2}(undef,size(constraints.at_fn_arrays))
+
+    for i in CartesianIndices(constraints.at_fn_arrays)
+        spin = i.I[2]==2
+        factor = spin ? -0.5 : 0.5
+        at_fn = constraints.at_fn_arrays[i]
+        arr = zeros(Float64,size(at_fn)...,2)
+        arr[:,:,:,1] = 0.5*at_fn
+        arr[:,:,:,2] = factor*at_fn
+        at_fn_arrs[i] = arr
+    end
+    return at_fn_arrs
+end
+
 
 mutable struct ArrayAndConstraints
     """

@@ -42,7 +42,7 @@ function (dm_constraints::DensityMixingConstraint)(basis::PlaneWaveBasis)
     return TermDensityMixingConstraint(Constraints(dm_constraints.cons_vec,basis))
 end
 
-@timing "ene_ops: constraint" function ene_ops(term::TermDensityMixingConstraint,basis,ψ,occupation;ρ::Array,cons_lambdas,cons_weights,kwargs...)
+@timing "ene_ops: constraint" function ene_ops(term::TermDensityMixingConstraint,basis,ψ,occupation;ρ::Array,cons_lambdas,kwargs...)
 
     #update the constraints
     term.constraints.lambdas = cons_lambdas
@@ -53,8 +53,8 @@ end
     term.constraints.current_values[:,1] = current_charges
     term.constraints.current_values[:,2] = current_spins
 
-    charge_pot_mod = zeros(Float64,size(term.constraints.at_fn_arrays[1,1]))
-    spin_pot_mod   = zeros(Float64,size(term.constraints.at_fn_arrays[1,1]))
+    charge_pot_mod = zeros(Number,size(term.constraints.at_fn_arrays[1,1]))
+    spin_pot_mod   = zeros(Number,size(term.constraints.at_fn_arrays[1,1]))
 
     for i=1:length(term.constraints.cons_vec)
         charge_pot_mod += term.constraints.at_fn_arrays[i,1].*term.constraints.lambdas[i,1]
@@ -67,11 +67,11 @@ end
         pot_size = size(charge_pot_mod)
     end
 
-    pot_mod = zeros(Float64,pot_size)
+    pot_mod = zeros(Number,pot_size)
 
     if length(pot_size)==4
-        pot_mod[:,:,:,1] += 0.5.*(charge_pot_mod+spin_pot_mod)
-        pot_mod[:,:,:,2] += 0.5.*(charge_pot_mod-spin_pot_mod)
+        pot_mod[:,:,:,1] = (charge_pot_mod+spin_pot_mod).*0.5
+        pot_mod[:,:,:,2] = (charge_pot_mod-spin_pot_mod).*0.5
     else
         pot_mod = charge_pot_mod
     end
@@ -79,9 +79,10 @@ end
     ops = [RealSpaceMultiplication(basis,kpt,pot_mod[:,:,:,kpt.spin])
            for kpt in basis.kpoints]
     
-    # E = sum(ρ.*pot_mod) * term.constraints.dvol
-    E = sum(term.constraints.lambdas .* (term.constraints.current_values-term.constraints.target_values))*2#*-11.5
+    E = sum(term.constraints.lambdas .* (term.constraints.current_values.-term.constraints.target_values))
 
     (; E, ops)
 
 end
+
+apply_kernel(term::TermDensityMixingConstraint,args...;kwargs...) = nothing

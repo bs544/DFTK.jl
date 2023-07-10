@@ -18,6 +18,7 @@ using GPUArraysCore
 using Random
 using ChainRulesCore
 using PrecompileTools
+using KrylovKit #for innerloop constraint
 
 export Vec3
 export Mat3
