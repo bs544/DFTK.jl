@@ -36,13 +36,134 @@ function vector_2_lambdas(λ,constraints::Constraints)
     return lambdas
 end
 
+function E_XC(term,ρout,ρin,basis)
+    ϵ = 1e-18
+    max_ρ_derivs = maximum(max_required_derivative, term.functionals)
+    density = LibxcDensities(basis, max_ρ_derivs, ρin, nothing)
+    terms = potential_terms(term.functionals, density)
+
+    den_ratio = ρout .* map(x-> x>ϵ ? 1/x : 0.0,ρin)
+    e = terms.e
+    e = reshape(e,basis.model.n_spin_components,basis.fft_size...)
+    e = permutedims(e,(2,3,4,1))
+    # den_ratio = sum(den_ratio,dims=4)
+    return term.scaling_factor*sum(den_ratio.*e)*basis.dvol
+end
+
+function Energy_after_diag(ham,basis,ρout,ρin,ψ,occupation,eigenvalues,εF,cons_lambdas)
+    """
+    Since some parts of the potential depend on ρin, these terms need to be explicitly calculated now.
+    Specifically the local potential parts need to be taken from the hamiltonian (H[ρin]) and used to compute this energy:
+    E_loc = ∫[v_Hxc[ρin](x)+v_ext(x)]ρout(x)dx
+    """
+
+    E = energy_hamiltonian(basis,ψ,occupation;ρ=ρout,eigenvalues,εF,cons_lambdas).energies #this will have most of the terms we want
+    V_loc = total_local_potential(ham)
+    xc_energy = 0.0
+
+    #get the Hartree and XC potentials in V_loc
+    spin_idxs = [first(krange_spin(basis,σ)) for σ = 1:basis.model.n_spin_components]
+
+    spin_up_block = ham.blocks[spin_idxs[1]]
+    spin_dn_block = ham.blocks[spin_idxs[2]]
+    pot_up = zeros(Float64,size(V_loc)[begin:3])
+    pot_dn = zeros(Float64,size(V_loc)[begin:3])
+
+    for i = 1:length(ham.basis.terms)
+        up_op = spin_up_block.operators[i]
+        dn_op = spin_dn_block.operators[i]
+        term = ham.basis.terms[i]
+        t_type = typeof(term)
+        if t_type <: TermHartree 
+            pot_up .+= up_op.potential 
+            pot_dn .+= dn_op.potential
+        elseif t_type <: TermXc 
+            pot_up .+= up_op.potential 
+            pot_dn .+= dn_op.potential
+            # xc_energy = E_XC(term,ρout,ρin,basis)
+        end
+    end
+
+    V_loc = cat([pot_up,pot_dn]... ,dims=4)
+
+    #Now calculate the energy using ρout
+
+    E_without_local = E.total - E.Xc - E.Hartree 
+    E_local = sum(ρout .* V_loc)*basis.dvol*0.5 + xc_energy    
+    return E_without_local + E_local
+
+end
+
+function HarrisFoulkesEnergy(ham,basis,ρout,ρin,ψ,occupation,eigenvalues,εF,cons_lambdas)
+    """
+    Since some parts of the potential depend on ρin, these terms need to be explicitly calculated now.
+    Specifically the local potential parts need to be taken from the hamiltonian (H[ρin]) and used to compute this energy:
+    E_loc = ∫[v_Hxc[ρin](x)+v_ext(x)]ρout(x)dx
+    """
+
+    eigenvalue_energy = sum(occ⋅(eig.-εF) for (occ,eig) in zip(occupation,eigenvalues))*basis.model.n_spin_components/length(occupation)
+
+    E = energy_hamiltonian(basis,ψ,occupation;ρ=ρout,eigenvalues,εF,cons_lambdas).energies #this will have most of the terms we want
+    V_loc = total_local_potential(ham)
+    xc_energy = 0.0
+
+    #get the Hartree and XC potentials in V_loc
+    spin_idxs = [first(krange_spin(basis,σ)) for σ = 1:basis.model.n_spin_components]
+
+    spin_up_block = ham.blocks[spin_idxs[1]]
+    spin_dn_block = ham.blocks[spin_idxs[2]]
+    pot_up = zeros(Float64,size(V_loc)[begin:3])
+    pot_dn = zeros(Float64,size(V_loc)[begin:3])
+
+    for i = 1:length(ham.basis.terms)
+        up_op = spin_up_block.operators[i]
+        dn_op = spin_dn_block.operators[i]
+        term = ham.basis.terms[i]
+        t_type = typeof(term)
+        if t_type <: TermHartree 
+            pot_up .+= up_op.potential 
+            pot_dn .+= dn_op.potential
+        elseif t_type <: TermXc 
+            pot_up .+= up_op.potential 
+            pot_dn .+= dn_op.potential
+            # xc_energy = E_XC(term,ρout,ρin,basis)
+        end
+    end
+
+    V_loc = cat([pot_up,pot_dn]... ,dims=4)
+
+    #Now calculate the energy using ρout
+
+    E_without_local = E.total - E.Xc - E.Hartree 
+    E_local = sum(ρout .* V_loc)*basis.dvol*0.5 + xc_energy    
+    return E_without_local + E_local
+end
+
+function E_from_eigenresults(εF,eigenvalues,occupation,constraints,lambdas,E_ρin)
+    """
+    εF : Fermi energy
+    occupation and eigenvalues are a vector of vectors
+        outer vector is for each k point, inner one is for each band
+    These eigenvalues are what you get from <ψₙₖ|̂H|ψₙₖ> = ε
+    The energy is then E = [(1/nₖ)∑ₖ ∑ₙ fₙₖεₙₖ] - ∑ᵢλᵢNᵢᵗ
+    This does the integral over the Brillouin Zone as an average over kpoints, with the sum over occupied bands
+    The extra term is needed since this λ dependence isn't in the 
+    """
+    E =  sum(occ⋅(eig.-εF) for (occ,eig) in zip(occupation,eigenvalues))*2/length(occupation)
+    E -= sum(constraints.target_values.*lambdas.*constraints.is_constrained)
+    # E -= 0.5*(E_ρin.Hartree + E_ρin.Xc)# + E_ρin.DensityMixingConstraint)
+    return E 
+end
+
+
 function EnGradFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,eigensolver=lobpcg_hyper,nbandsalg,fermialg,tol,constraints)
 
     lambdas = vector_2_lambdas(λ,constraints)
-    ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas, cons_weights=weights).ham
-    ψ, eigenvalues, occupation, εF, ρout = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
-                                                        occupation, miniter=1, tol)
-    E = energy_hamiltonian(basis, ψ, occupation; ρ=ρout, eigenvalues, εF,cons_lambdas=lambdas,cons_weights=weights).energies
+    E_ρin,ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas)
+    ψ, eigenvalues, occupation, εF, ρout = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues, occupation, miniter=1, tol)
+    E,ham_out = energy_hamiltonian(basis, ψ, occupation; ρ=ρout, eigenvalues, εF,cons_lambdas=lambdas)#.energies
+    E = E_from_eigenresults(εF,eigenvalues,occupation,constraints,lambdas,E)
+    # E = Energy_after_diag(ham,basis,ρout,ρ,ψ,occupation,eigenvalues,εF,lambdas)
 
     deriv_array = residual(ρout,ArrayAndConstraints(ρ,lambdas,weights),basis).lambdas
     deriv_array ./= weights
@@ -57,7 +178,7 @@ function dielectric_operator(δρ,basis,ρ,ham,ψ,occupation,εF,eigenvalues)
     return δρ - χ0δV
 end
 
-function second_deriv_wrt_lagrange(λ,constraints,interacting=true;basis,ρ,ham,ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,tol=nothing,nbandsalg=nothing,fermialg=nothing,eigensolver=lobpcg_hyper)
+function second_deriv_wrt_lagrange(λ,constraints,interacting=false;basis,ρ,ham,ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,tol=nothing,nbandsalg=nothing,fermialg=nothing,eigensolver=lobpcg_hyper)
 
     lambdas = vector_2_lambdas(λ,constraints)
     weights = constraints.res_wgt_arrs
@@ -65,7 +186,7 @@ function second_deriv_wrt_lagrange(λ,constraints,interacting=true;basis,ρ,ham,
         #assume ρ is ρin
         #need to generate a hamiltonian to diagonalise
         if isnothing(ham)
-            ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas, cons_weights=weights).ham
+            ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas).ham
         end
         ψ, eigenvalues, occupation, εF, ρ = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
                                                          occupation, miniter=1, tol)
@@ -77,7 +198,7 @@ function second_deriv_wrt_lagrange(λ,constraints,interacting=true;basis,ρ,ham,
     at_fns = lambdas_2_vector(at_fn_arrs,constraints)
     χ0_at_fns = [apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn) for at_fn in at_fns]
     if interacting
-        inv_εs = [linsolve(arr->ε(arr),χ0_at_fn,verbosity=1)[1] for χ0_at_fn in χ0_at_fns]
+        inv_εs = [linsolve(arr->ε(arr),χ0_at_fn,verbosity=3)[1] for χ0_at_fn in χ0_at_fns]
     else
         inv_εs = χ0_at_fns
     end
@@ -86,7 +207,13 @@ function second_deriv_wrt_lagrange(λ,constraints,interacting=true;basis,ρ,ham,
     
     for i = 1:length(at_fns)
         for j = i:length(at_fns)
-            Hessian[i,j] = sum(at_fns[i].*inv_εs[j])*constraints.dvol
+            H = 0.0
+            for σ1 = 1:2
+                # for σ2 = 1:2
+                    H += sum(at_fns[i][:,:,:,σ1] .* inv_εs[j][:,:,:,σ1])*constraints.dvol
+                # end
+            end
+            Hessian[i,j] = H*2 #0.5*H
             Hessian[j,i] = Hessian[i,j]
         end
     end
@@ -106,7 +233,7 @@ function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,
     deriv_array ./= weights
     deriv_array = lambdas_2_vector(deriv_array,constraints)
     
-    Hessian = second_deriv_wrt_lagrange(λ,constraints,false;basis,ρ=ρout,ham,ψ,occupation,εF,eigenvalues)
+    Hessian = second_deriv_wrt_lagrange(λ,constraints;basis,ρ=ρout,ham,ψ,occupation,εF,eigenvalues)
 
     return E, deriv_array, Hessian
 end

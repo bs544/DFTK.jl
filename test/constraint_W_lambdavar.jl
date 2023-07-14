@@ -17,6 +17,17 @@ function finite_diff(x,y)
     return mid_xs,grads
 end
 
+function central_diff(x,y)
+    δx = x[2]-x[1]
+    y_1 = y[begin:end-2]
+    y_2 = y[begin+2:end]
+
+    δy = y_2-y_1
+
+    grads = δy./(2*δx)
+    return x[begin+1:end-1],grads
+end
+
 function get_scf(model;ecut,kgrid,magnetic_moments,tol=1.0e-10,maxiter=100,α=0.8,fname)
     basis = PlaneWaveBasis(model;Ecut=ecut,kgrid=kgrid)
     ρ0 = guess_density(basis,magnetic_moments)
@@ -42,7 +53,26 @@ function run_iron_constrain()
     model = model_PBE(lattice, atoms, positions;
                       temperature=0.01, magnetic_moments,symmetries=false)
     model = convert(Model{Float64}, model)
-    fname = "./test/constraint_spin_data_iron_pbe_rho.h5"
+
+
+    resid_weight = 1.0#0.01
+    r_sm_frac = 0.1
+    r_cut = 2.0
+    spin = 1.5
+    charge = 4.736
+    spin_cons = false
+    if spin_cons
+        idx = 2
+        target = spin
+        fname = "./test/constraint_spin_data_iron_pbe_rho.h5"
+        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+    else
+        idx = 1
+        target = charge
+        fname = "./test/constraint_charge_data_iron_pbe_rho.h5"
+        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_charge=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+    end
+
     if !isfile(fname)
         ρ0 = get_scf(model;ecut=15,kgrid=[3,3,3],magnetic_moments,fname)
     else
@@ -51,22 +81,14 @@ function run_iron_constrain()
         end
     end
 
-    resid_weight = 1.0#0.01
-    r_sm_frac = 0.1
-    r_cut = 2.0
-    spin = 1.5
-    charge = 4.736
-    idx = 1
-
     # basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
     
-    lambdas   = [i for i ∈-0.1:0.01:0.1]
+    lambdas   = [i for i ∈-0.1:0.01:0.0]#0.1]
     energies  = []
     grads     = []
     Ns        = []
     gradgrads = []
 
-    constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
     constraint_term = DFTK.DensityMixingConstraint(constraints)
     
     terms = model.term_types
@@ -83,23 +105,28 @@ function run_iron_constrain()
     
     for lambda in lambdas
         println("lambda: $lambda")
-        energy,grad,Hessian = DFTK.EnDerivsFromLagrange([lambda];basis,ρ=ρ0,weights=ρ_cons.weights,tol=diagtol,
+        energy,grad = DFTK.EnGradFromLagrange([lambda];basis,ρ=ρ0,weights=ρ_cons.weights,tol=diagtol,
                                               ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,nbandsalg,fermialg,constraints=DFTK.get_constraints(basis))
-
-        N = grad ./ ρ_cons.weights
-        N = N[idx] + charge#spin
+        N = grad[1]
+        N = N + target
 
         push!(energies,energy)
         push!(grads,grad[1])
         push!(Ns,N)
-        push!(gradgrads,Hessian[1,1])
     end
+    println(Ns)
 
     Ws = [energy.total for energy in energies]
     Cons = [energy.energies["DensityMixingConstraint"] for energy in energies]
     Es = [Ws[i]-Cons[i] for i = 1:length(Ws)]
 
-    fd_x,fd_grads = finite_diff(lambdas,Ws)
+    fd_x,fd_grads = central_diff(lambdas,Ws)
+    fd_x,fd_E = central_diff(lambdas,Es)
+    fd_x,fd_C = central_diff(lambdas,Cons)
+    fd_x,fd_N = central_diff(lambdas,Ns)
+    λ_fd_N = fd_x.*fd_N
+    println(λ_fd_N)
+    # grad_diffs = (grads[begin+1:end-1]-fd_E)./fd_x
 
     p = plot(lambdas,Ws.-Ws[1],label="W")
     plot!(p,lambdas,Es.-Es[1],label="E")
@@ -108,15 +135,15 @@ function run_iron_constrain()
     
     display(p)
 
-    new_plot = plot(lambdas,grads,label="analytic")
-    plot!(new_plot,fd_x,fd_grads ,label="finite diff")
+    new_plot = plot(lambdas,grads,label="N-Nᵗ")
+    plot!(new_plot,fd_x,fd_grads ,label="dW/dλ")
+    plot!(new_plot,fd_x,fd_E     ,label="dE/dλ")
+    plot!(new_plot,fd_x,λ_fd_N   ,label="λdN/dλ")
+    plot!(new_plot,fd_x,λ_fd_N+fd_E+grads[begin+1:end-1],label="combination")
     display(new_plot)
 
-    fd_dx,fd_dgrads = finite_diff(lambdas,grads)
-    p = plot(lambdas,gradgrads,label="analytic")
-    plot!(p,fd_dx,fd_dgrads,label="finite_diff")
-    display(p)
-    println(gradgrads)
+    # p = plot(fd_x,grad_diffs)
+    # display(p)
 
 
 
