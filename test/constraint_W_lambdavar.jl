@@ -60,17 +60,17 @@ function run_iron_constrain()
     r_cut = 2.0
     spin = 1.5
     charge = 4.736
-    spin_cons = false
+    spin_cons = true
     if spin_cons
         idx = 2
         target = spin
         fname = "./test/constraint_spin_data_iron_pbe_rho.h5"
-        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=target,target_charge=charge,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
     else
         idx = 1
         target = charge
         fname = "./test/constraint_charge_data_iron_pbe_rho.h5"
-        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_charge=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,target_charge=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
     end
 
     if !isfile(fname)
@@ -103,16 +103,19 @@ function run_iron_constrain()
     nbandsalg = AdaptiveBands(basis.model)
     fermialg  = DFTK.default_fermialg(basis.model)
     
+    λ0 = 0.1
     for lambda in lambdas
         println("lambda: $lambda")
-        energy,grad,hessian = DFTK.EnDerivsFromLagrange([lambda];basis,ρ=ρ0,weights=ρ_cons.weights,tol=diagtol,
+        energy,grad,hessian = DFTK.EnDerivsFromLagrange([lambda,λ0];basis,ρ=ρ0,weights=ρ_cons.weights,tol=diagtol,
                                               ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,nbandsalg,fermialg,constraints=DFTK.get_constraints(basis))
         N = grad[1]
         N = N + target
 
+        println(hessian)
+
         push!(Ws,energy)
-        push!(grads,grad[1])
-        push!(gradgrads,hessian[1,1])
+        push!(grads,grad[2])
+        push!(gradgrads,hessian[1,2])
         push!(Ns,N)
     end
 

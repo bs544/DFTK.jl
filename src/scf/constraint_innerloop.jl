@@ -125,22 +125,28 @@ function second_deriv_wrt_lagrange(λ,constraints,interacting=false;basis,ρ,ham
     end
 
     Hessian = zeros(Float64,length(at_fns),length(at_fns))
-    spin_term = [1.0 -1.0;
-                -1.0  1.0]
-    
+
+    #this whole spin term thing is *super* hacky and may prevent this stuff from being extended beyond just spins and charges
+    spin_term = [1 -1;
+                -1  1]
+    spin_terms = Array{Array{Int,2},2}(undef,size(at_fn_arrs)...)
+    for i in CartesianIndices(spin_terms)
+        arr = i.I[2]==2 ? spin_term : ones(Int,2,2)
+        spin_terms[i] = arr
+    end
+    spin_terms = lambdas_2_vector(spin_terms,constraints)
     for i = 1:length(at_fns)
         for j = i:length(at_fns)
             H = 0.0
             for σ1 = 1:2
-                for σ2 = 1:2
-                    H += sum(at_fns[i][:,:,:,σ1] .* inv_εs[j][:,:,:,σ2])*basis.dvol*spin_term[σ1,σ2]
+                for σ2 = 1:2 
+                    H += sum(at_fns[i][:,:,:,σ1] .* inv_εs[j][:,:,:,σ2])*basis.dvol*spin_terms[i][σ1,σ2]
                 end
             end
             Hessian[i,j] = 0.5*H
             Hessian[j,i] = Hessian[i,j]
         end
     end
-
     return Hessian
 end
 
