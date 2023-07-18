@@ -84,7 +84,7 @@ function run_iron_constrain()
     # basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
     
     lambdas   = [i for i ∈-0.1:0.01:0.0]#0.1]
-    energies  = []
+    Ws        = []
     grads     = []
     Ns        = []
     gradgrads = []
@@ -96,7 +96,7 @@ function run_iron_constrain()
     model = Model(model;terms)
     basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
     
-    ρ0     = guess_density(basis,magnetic_moments)
+    # ρ0     = guess_density(basis,magnetic_moments)
     ρ_cons = DFTK.ArrayAndConstraints(ρ0,basis)
     
     diagtol   = 0.003
@@ -105,45 +105,33 @@ function run_iron_constrain()
     
     for lambda in lambdas
         println("lambda: $lambda")
-        energy,grad = DFTK.EnGradFromLagrange([lambda];basis,ρ=ρ0,weights=ρ_cons.weights,tol=diagtol,
+        energy,grad,hessian = DFTK.EnDerivsFromLagrange([lambda];basis,ρ=ρ0,weights=ρ_cons.weights,tol=diagtol,
                                               ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,nbandsalg,fermialg,constraints=DFTK.get_constraints(basis))
         N = grad[1]
         N = N + target
 
-        push!(energies,energy)
+        push!(Ws,energy)
         push!(grads,grad[1])
+        push!(gradgrads,hessian[1,1])
         push!(Ns,N)
     end
-    println(Ns)
-
-    Ws = [energy.total for energy in energies]
-    Cons = [energy.energies["DensityMixingConstraint"] for energy in energies]
-    Es = [Ws[i]-Cons[i] for i = 1:length(Ws)]
 
     fd_x,fd_grads = central_diff(lambdas,Ws)
-    fd_x,fd_E = central_diff(lambdas,Es)
-    fd_x,fd_C = central_diff(lambdas,Cons)
-    fd_x,fd_N = central_diff(lambdas,Ns)
-    λ_fd_N = fd_x.*fd_N
-    println(λ_fd_N)
+    fd_x,fd_hess = central_diff(lambdas,grads)
     # grad_diffs = (grads[begin+1:end-1]-fd_E)./fd_x
 
-    p = plot(lambdas,Ws.-Ws[1],label="W")
-    plot!(p,lambdas,Es.-Es[1],label="E")
-    plot!(p,lambdas,Cons.-Cons[1],label="Cons")
-    plot!(p,legend=:bottomleft)
+    p1 = plot(lambdas,Ws.-Ws[1],label="W")
+    plot!(p1,legend=:bottomleft)
     
-    display(p)
+    display(p1)
 
-    new_plot = plot(lambdas,grads,label="N-Nᵗ")
-    plot!(new_plot,fd_x,fd_grads ,label="dW/dλ")
-    plot!(new_plot,fd_x,fd_E     ,label="dE/dλ")
-    plot!(new_plot,fd_x,λ_fd_N   ,label="λdN/dλ")
-    plot!(new_plot,fd_x,λ_fd_N+fd_E+grads[begin+1:end-1],label="combination")
-    display(new_plot)
+    p2 = plot(lambdas,grads,label="N-Nᵗ")
+    plot!(p2,fd_x,fd_grads ,label="dW/dλ")
+    display(p2)
 
-    # p = plot(fd_x,grad_diffs)
-    # display(p)
+    p3 = plot(lambdas,gradgrads,label="H_analytic")
+    plot!(p3,fd_x,fd_hess,label="H_fd")
+    display(p3)
 
 
 
