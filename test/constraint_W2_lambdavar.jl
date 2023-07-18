@@ -51,16 +51,19 @@ function run_iron_constrain()
                     0.0 1.0 0.0;
                     0.0 0.0 1.0]
     model = model_PBE(lattice, atoms, positions;
-                      temperature=0.01, magnetic_moments,symmetries=false)
+                      temperature=0.01, symmetries=false,magnetic_moments)
     model = convert(Model{Float64}, model)
+    # magnetic_moments = [0.1,0.0]
+    # model = model_LDA(silicon.lattice,silicon.atoms,silicon.positions; temperature=0.001,smearing=Smearing.Gaussian(),symmetries=false,magnetic_moments)
+    # model = convert(Model{Float64},model)
 
 
-    resid_weight = 1.0#0.01
+    resid_weight = 0.01
     r_sm_frac = 0.1
     r_cut = 2.0
     spin = 1.5
     charge = 4.736
-    spin_cons = false
+    spin_cons = true
     if spin_cons
         idx = 2
         target = spin
@@ -80,21 +83,34 @@ function run_iron_constrain()
             read(file,"rho")
         end
     end
-
-    # basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
     
-    lambdas   = [i for i ∈-0.1:0.01:-0.06]#0.1]
+    lambdas   = [i for i ∈0.01:0.0025:0.03]
     energies  = []
     grads     = []
+    Es        = []
     Ns        = []
     cons_es   = []
+    kin_es    = []
+    ent_es    = []
+    sum_es    = []
+    loc_es    = []
 
     constraint_term = DFTK.DensityMixingConstraint(constraints)
     
     terms = model.term_types
-    push!(terms,constraint_term)
-    model = Model(model;terms)
-    basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
+    new_terms = []
+    xc_idx = 0
+    for (i,term) in enumerate(terms)
+        if true #!(typeof(term)<:Xc || typeof(term)<:Hartree || typeof(term) <: Ewald || typeof(term) <: PspCorrection || typeof(term) <: AtomicNonlocal || typeof(term) <: AtomicLocal)
+            push!(new_terms,term)
+        end
+        if typeof(term) <: Xc
+            xc_idx = i
+        end
+    end
+    push!(new_terms,constraint_term)
+    model = Model(model;terms=new_terms)
+    basis = PlaneWaveBasis(model; Ecut=10, kgrid=[2,2,2])
     
     ρ0     = guess_density(basis,magnetic_moments)
     ρ_cons = DFTK.ArrayAndConstraints(ρ0,basis)
@@ -105,32 +121,88 @@ function run_iron_constrain()
     
     for lambda in lambdas
         println("lambda: $lambda")
-        energy,grad = DFTK.EnGradFromLagrange([lambda];basis,ρ=ρ0,weights=ρ_cons.weights,tol=diagtol,
+        energy,grad, ham_out,ρout,E = DFTK.EnGradFromLagrange([lambda];basis,ρ=ρ0,weights=ρ_cons.weights,tol=diagtol,
                                               ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,nbandsalg,fermialg,constraints=DFTK.get_constraints(basis))
         N = grad[1]
         N = N + target
 
-        Cons = grad[1]*lambda
+        constraints=DFTK.get_constraints(basis)
+        E_cons,V_op = DFTK.ene_ops(DFTK.TermDensityMixingConstraint(constraints),basis,nothing,nothing;ρ = ρout,cons_lambdas=constraints.lambdas)
+        spin_indices = [first(DFTK.krange_spin(basis,σ)) for σ = 1:basis.model.n_spin_components]
+        _,V_xc = DFTK.ene_ops(basis.terms[xc_idx],basis,nothing,nothing;ρ=ρout)
+        V_xc_up = V_xc[spin_indices[1]].potential
+        # V_xc_dn = V_xc[spin_indices[2]].potential
+        println(V_xc_up[1])#,"\t",V_xc_dn[1])
+        # V_up = V_op[spin_indices[1]].potential
+        # V_dn = V_op[spin_indices[2]].potential
+        # V_ham = DFTK.total_local_potential(ham_out)
+        # println(maximum(abs.(V_up)))#,"\t",maximum(abs.(V_up[:,:,:,1])),"\t",maximum(abs.(V_up[:,:,:,2])))
+        # println(maximum(abs.(V_dn)))#,"\t",maximum(abs.(V_dn[:,:,:,1])),"\t",maximum(abs.(V_dn[:,:,:,2])))
+        # println(maximum(abs.(V_ham)),"\t",maximum(abs.(V_ham[:,:,:,2])))
 
-        push!(energies,energy)
+        n = DFTK.integrate_atomic_functions(ρout[:,:,:,1],constraints,1)[1]
+        m = DFTK.integrate_atomic_functions(total_density(ρout),constraints,1)[1]
+        println(m/n)
+        cons_e = lambda * (m-constraints.target_values[1,1])
+        println(cons_e/E_cons)
+
+        push!(cons_es,E_cons)
+        push!(kin_es,E.Kinetic)
+        push!(ent_es,E.Entropy)
+        # push!(loc_es,E.AtomicLocal)
+        push!(sum_es,E.Entropy+E_cons)#+E.Kinetic)
+
+        # energy[1] += cons_e - E_cons
+
+        push!(energies, energy)
         push!(grads,grad[1])
-        push!(Ns,N)
-        push!(cons_es,Cons)
+        push!(Ns,n)
     end
-    println(energies)
+    # println(energies)
+    labels = energies[1][end]
+    Es = [[e[i] for e in energies] for i = 1:length(labels)]
 
-    Ws = energies
-    Es = Ws .- cons_es
 
-    fd_x,fd_ws = central_diff(lambdas,Ws)
-    fd_x,fd_es = central_diff(lambdas,Es)
-    fd_x,fd_cs = central_diff(lambdas,cons_es)
+    plot1 = plot(lambdas,grads,label="N-Nᵗ")    
+    plot2 = plot()
+    plot3 = plot()#lambdas,Ns,label="N")
 
-    new_plot = plot(lambdas,grads   ,label="N-Nᵗ")
-    plot!(new_plot,fd_x,fd_es       ,label="dE/dλ")
-    plot!(new_plot,fd_x,fd_ws       ,label="dW/dλ")
-    plot!(new_plot,fd_x,fd_cs.*fd_x ,label="λ dC/dλ")
-    display(new_plot)
+    sum_grads = zeros(Float64,length(lambdas)-2)
+    fd_e = nothing
+    for (e_test,label) in zip(Es,labels)
+        fd_x,fd_e = central_diff(lambdas,e_test)
+        if label != "∑ᵢ εᵢ"
+            plot!(plot1,fd_x,fd_e,label=label)
+        else
+            plot!(plot3,fd_x,fd_e.-Ns[begin+1:end-1],label="$label - N")
+        end
+        println(label)
+        # plot!(plot2,fd_x,fd_e-grads[begin+1:end-1],label=label)
+    end
+    fd_x,fd_e_cons = central_diff(lambdas,cons_es)
+    # plot!(plot1,fd_x,fd_e_cons,label="Cons E")
+    fd_x,fd_e_kin = central_diff(lambdas,kin_es)
+    plot!(plot2,fd_x,fd_e_kin,label="Kin E")
+    fd_x,fd_e_ent = central_diff(lambdas,ent_es)
+    plot!(plot2,fd_x,fd_e_ent,label="Ent E")
+    # fd_x,fd_e_loc = central_diff(lambdas,loc_es)
+    # plot!(plot2,fd_x,fd_e_loc,label="Loc E")
+
+
+    fd_x,fd_N = central_diff(lambdas,Ns)
+    plot!(plot2,fd_x,fd_N.*fd_x,label="λ dN/dλ")
+    sum_grads .+=  fd_e_ent + fd_N.*fd_x + fd_e_kin #+ fd_e_loc 
+
+    plot!(plot2,fd_x,sum_grads,label="Sum")
+    
+
+    plot!(plot1,legend=:outerbottom)
+    # plot!(plot2,legend=:outerbottom)
+    display(plot1)
+    # display(plot2)
+    # display(plot3)
+
+    
 
 
 end

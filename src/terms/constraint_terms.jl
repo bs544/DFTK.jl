@@ -57,21 +57,24 @@ end
     spin_pot_mod   = zeros(Number,size(term.constraints.at_fn_arrays[1,1]))
 
     for i=1:length(term.constraints.cons_vec)
-        charge_pot_mod += term.constraints.at_fn_arrays[i,1].*term.constraints.lambdas[i,1]
-        spin_pot_mod   += term.constraints.at_fn_arrays[i,2].*term.constraints.lambdas[i,2]
+        charge_pot_mod += term.constraints.at_fn_arrays[i,1].*term.constraints.lambdas[i,1].*term.constraints.is_constrained[i,1]
+        spin_pot_mod   += term.constraints.at_fn_arrays[i,2].*term.constraints.lambdas[i,2].*term.constraints.is_constrained[i,2]
     end
 
-    if basis.model.spin_polarization==:collinear
-        pot_size = (size(charge_pot_mod)...,2)
-    else
-        pot_size = size(charge_pot_mod)
-    end
+    # if basis.model.spin_polarization==:collinear
+    #     pot_size = (size(charge_pot_mod)...,2)
+    # else
+    #     pot_size = size(charge_pot_mod)
+    # end
+    pot_size = size(ρ)
 
     pot_mod = zeros(Number,pot_size)
 
-    if length(pot_size)==4
-        pot_mod[:,:,:,1] = (charge_pot_mod+spin_pot_mod).*0.5
-        pot_mod[:,:,:,2] = (charge_pot_mod-spin_pot_mod).*0.5
+    if length(pot_size)==4 && pot_size[4] == 2
+        pot_mod[:,:,:,1] = (charge_pot_mod+spin_pot_mod)#.*0.5
+        pot_mod[:,:,:,2] = (charge_pot_mod-spin_pot_mod)#.*0.5
+    elseif length(pot_size)==4
+        pot_mod[:,:,:,1] = charge_pot_mod
     else
         pot_mod = charge_pot_mod
     end

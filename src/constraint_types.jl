@@ -252,16 +252,18 @@ function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBa
 
     deriv_array = zeros(Float64,size(constraints.lambdas))
 
-    if length(size(ρout))==4
+    spin_dens = nothing
+    if length(size(ρout))==4 && size(ρout)[4]==2
         charge_dens = ρout[:,:,:,1]+ρout[:,:,:,2]
         spin_dens = ρout[:,:,:,1]-ρout[:,:,:,2]
+    elseif length(size(ρout))==4
+        charge_dens = ρout[:,:,:,1]
     else
         charge_dens = ρout
-        spin_dens = nothing
     end
 
     charges = integrate_atomic_functions(charge_dens,constraints,1)
-    spins = !isnothing(spin_density) ? integrate_atomic_functions(spin_dens,constraints,2) : zeros(Float64,size(charges))
+    spins = !isnothing(spin_dens) ? integrate_atomic_functions(spin_dens,constraints,2) : zeros(Float64,size(charges))
 
     constraints.current_values[:,1] = charges
     constraints.current_values[:,2] = spins
