@@ -185,10 +185,10 @@ function get_4d_at_fns(constraints::Constraints)
 
     for i in CartesianIndices(constraints.at_fn_arrays)
         spin = i.I[2]==2
-        factor = spin ? -0.5 : 0.5
+        factor = spin ? -1.0 : 1.0
         at_fn = constraints.at_fn_arrays[i]
         arr = zeros(Float64,size(at_fn)...,2)
-        arr[:,:,:,1] = 0.5*at_fn
+        arr[:,:,:,1] = at_fn
         arr[:,:,:,2] = factor*at_fn
         at_fn_arrs[i] = arr
     end
