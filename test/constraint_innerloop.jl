@@ -70,6 +70,7 @@ function run_iron_constrain()
 
     Ecut = 10
     kgrid = [2,2,2]
+    nbandsalg = AdaptiveBands(model;n_bands_converge=14)
     # basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
     
     cons_infos = []
@@ -80,7 +81,7 @@ function run_iron_constrain()
         constraints = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,r_cut),DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
         basis = initial_lambda(model,constraints,magnetic_moments,initial_optimize;Ecut,kgrid)
         ρ0 = guess_density(basis,magnetic_moments)
-        res= DFTK.scf_constrained_innerloop(basis;ρ=ρ0,tol=1.0e-10,damping=α,λ_tol)
+        res= DFTK.scf_constrained_innerloop(basis;ρ=ρ0,tol=1.0e-10,damping=α,λ_tol,nbandsalg)
         constraints= res.constraints
         println(constraints.current_values)
 

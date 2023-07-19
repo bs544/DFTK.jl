@@ -195,7 +195,7 @@ function innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_H
     end
     λ = lambdas_2_vector(lambdas,constraints)
     λ = zeros(Float64,size(λ))
-    optim_results = Optim.optimize(Optim.only_fgh!(fgh!),λ,method=ConjugateGradient();
+    optim_results = Optim.optimize(Optim.only_fgh!(fgh!),λ,method=Newton();
                                    store_trace=true,extended_trace=true,
                                    iterations=max_cons_iter,show_trace=false,inplace=true,x_tol=λ_tol)
     new_lambdas= Optim.x_trace(optim_results)[end]
@@ -204,7 +204,7 @@ function innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_H
     # println(Optim.x_trace(optim_results))
     new_lambdas = vector_2_lambdas(new_lambdas,constraints)
     update_constraints!(basis,new_lambdas)
-    push!(n_Ham_diags,Optim.f_calls(optim_results))
+    push!(n_Ham_diags,Optim.f_calls(optim_results))#use this as a proxy for the number of Hamiltonian diagonalisations needed for λ convergence
 end
 
 @doc raw"""
@@ -285,7 +285,6 @@ The constraining lagrange multipliers are found in an inner loop using the Newto
         diagtol = determine_diagtol(info)
         max_cons_iter = 20
         innerloop!(ρin,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;ψ,occupation,εF,eigenvalues)
-        println(n_Ham_diags[end])
         # Note that ρin is not the density of ψ, and the eigenvalues
         # are not the self-consistent ones, which makes this energy non-variational
         energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρin, eigenvalues, εF)
