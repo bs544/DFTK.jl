@@ -65,12 +65,12 @@ function run_iron_constrain()
         idx = 2
         target = spin
         fname = "./test/constraint_spin_data_iron_pbe_rho.h5"
-        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=target,target_charge=charge,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
     else
         idx = 1
         target = charge
         fname = "./test/constraint_charge_data_iron_pbe_rho.h5"
-        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,target_charge=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_charge=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
     end
 
     if !isfile(fname)
@@ -94,9 +94,9 @@ function run_iron_constrain()
     terms = model.term_types
     push!(terms,constraint_term)
     model = Model(model;terms)
-    basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
+    basis = PlaneWaveBasis(model; Ecut=10, kgrid=[2,2,2])
     
-    # ρ0     = guess_density(basis,magnetic_moments)
+    ρ0     = guess_density(basis,magnetic_moments)
     ρ_cons = DFTK.ArrayAndConstraints(ρ0,basis)
     
     diagtol   = 0.003
@@ -114,8 +114,8 @@ function run_iron_constrain()
         println(hessian)
 
         push!(Ws,energy)
-        push!(grads,grad[2])
-        push!(gradgrads,hessian[1,2])
+        push!(grads,grad[1])
+        push!(gradgrads,hessian[1,1])
         push!(Ns,N)
     end
 

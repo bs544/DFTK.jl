@@ -150,8 +150,16 @@ function second_deriv_wrt_lagrange(λ,constraints,interacting=false;basis,ρ,ham
     return Hessian
 end
 
-function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,eigensolver=lobpcg_hyper,nbandsalg,fermialg,tol,constraints)
-
+function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,eigensolver=lobpcg_hyper,nbandsalg,fermialg,tol=0.003,constraints,do_hessian=true,do_grad=true)
+    """
+    Convert the λ vector to the array used by the constraints
+    Generate the Hamiltonian and diagonalise it
+    Use ρin, ρout and (ψ,occ) to generate the Energy and its first and second derivatives
+    dE/dλᵢ = Nᵢ-Nᵢᵗ
+    d²E/dλᵢdλⱼ = dNᵢ/dλⱼ = 1/2 ∑ₛₛ₋ ∫ wᵢˢ(x) χˢˢ⁻(x,x') wᵢˢ⁻(x') dx dx'
+    Do all in one function to minimise the number of Hamiltonian diagonalisations 
+    Have the option of skipping the hessian calculation since it's pretty costly
+    """
     lambdas = vector_2_lambdas(λ,constraints)
     ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas, cons_weights=weights).ham
     ψ, eigenvalues, occupation, εF, ρout = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
@@ -160,47 +168,11 @@ function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,
 
     deriv_array = residual(ρout,ArrayAndConstraints(ρ,lambdas,weights),basis).lambdas
     deriv_array ./= weights
-    deriv_array = lambdas_2_vector(deriv_array,constraints)
+    deriv_array = do_grad ? lambdas_2_vector(deriv_array,constraints) : nothing
     
-    Hessian = second_deriv_wrt_lagrange(λ,constraints;basis,ρ=ρout,ham,ψ,occupation,εF,eigenvalues)
+    Hessian = do_hessian ? second_deriv_wrt_lagrange(λ,constraints;basis,ρ=ρout,ham,ψ,occupation,εF,eigenvalues) : nothing
 
     return E, deriv_array, Hessian
-end
-
-function energy_from_lagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,eigensolver=lobpcg_hyper,nbandsalg,fermialg,tol,constraints) 
-    """
-    convert from the vector to the lambdas array
-    then get the hamiltonian with energy_hamiltonian
-    then diagonalise the hamiltonian with next_density
-    use the outputs of the diagonalisation to get the energy
-    """
-    lambdas = vector_2_lambdas(λ,constraints)
-    ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas, cons_weights=weights).ham
-    ψ, eigenvalues, occupation, εF, ρout = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
-                                                        occupation, miniter=1, tol)
-    E = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF,cons_lambdas=lambdas,cons_weights=weights).energies
-    return E#.total
-    # grad = lagrange_gradient(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,nbandsalg,fermialg,tol,eigensolver,constraints)
-    # return dot(grad,grad)
-end
-
-function lagrange_gradient(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,nbandsalg,fermialg,tol,eigensolver=lobpcg_hyper,constraints)
-    """
-    Convert from the vector to the lambdas array, 
-    then get the hamiltonian from the density and lambdas array,
-    then get the output density by diagonalising the hamiltonian,
-    use this density to get the derivative array (i.e. difference between current values and target values)
-    """
-    lambdas = vector_2_lambdas(λ,constraints)
-    ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=lambdas, cons_weights=weights).ham
-    ρout = next_density(ham, nbandsalg, fermialg; eigensolver, ψ, eigenvalues,
-                                 occupation, miniter=1, tol).ρout
-    deriv_array = residual(ρout,ArrayAndConstraints(ρ,lambdas,weights),basis).lambdas
-    deriv_array ./= weights
-    # spins = integrate_atomic_functions(spin_density(ρout),constraints,2)
-    # println(spins,constraints.target_values[:,2])
-    deriv_array = lambdas_2_vector(deriv_array,constraints)
-    return deriv_array
 end
 
 function innerloop(ρ_cons::ArrayAndConstraints,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter;ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing)
@@ -215,14 +187,29 @@ function innerloop(ρ_cons::ArrayAndConstraints,basis,nbandsalg,fermialg,diagtol
     weights = ρ_cons.weights
     constraints = get_constraints(basis)
 
-    ben_fn(λ) = energy_from_lagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,nbandsalg,fermialg,tol=diagtol,constraints)#.*-1.0
-    ben_grad_fn(λ) = lagrange_gradient(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,nbandsalg,fermialg,tol=diagtol,constraints).*-1.0
-
+    function fgh!(F,G,H,λ)
+        do_hessian = !isnothing(H)
+        do_grad = !isnothing(G)
+        # println(G,"\t",typeof(G))
+        # println(H,"\t",typeof(H))
+        println(λ)
+        E,_G,_H = EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,nbandsalg,fermialg,tol=diagtol,constraints,do_hessian,do_grad)
+        if do_grad
+            G[:] = -_G[:]
+        end
+        if do_hessian
+            H[:,:] = -_H[:,:]
+        end
+        # println(G,"\t",typeof(G))
+        # println(H,"\t",typeof(H))
+        isnothing(F) || return -E #have to make all of these negative since you're maximising the energy and Optim minimises functions
+        return nothing
+    end
     λ = lambdas_2_vector(lambdas,constraints)
     λ = zeros(Float64,size(λ))
-    optim_results = Optim.optimize(ben_fn,ben_grad_fn,λ,method=ConjugateGradient();
+    optim_results = Optim.optimize(Optim.only_fgh!(fgh!),λ,method=ConjugateGradient();
                                    store_trace=true,extended_trace=true,
-                                   iterations=max_cons_iter,show_trace=true,inplace=false,x_tol=λ_tol)
+                                   iterations=max_cons_iter,show_trace=true,inplace=true,x_tol=λ_tol)
     new_lambdas= Optim.x_trace(optim_results)[end]
 
     println(optim_results)

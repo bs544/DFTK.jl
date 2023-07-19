@@ -9,12 +9,12 @@ function update_constraints!(basis::PlaneWaveBasis,lambdas)
     end
 end
 
-function initial_lambda(model,constraints,magnetic_moments,initial_optimize)
+function initial_lambda(model,constraints,magnetic_moments,initial_optimize;Ecut=10,kgrid=[2,2,2])
     constraint_term = DFTK.DensityMixingConstraint(constraints)
     terms = model.term_types
     push!(terms,constraint_term)
     tmp_model = Model(model;terms)
-    basis = PlaneWaveBasis(tmp_model; Ecut=15, kgrid=[3,3,3])
+    basis = PlaneWaveBasis(tmp_model; Ecut, kgrid)
     if initial_optimize
         ρ0 = guess_density(basis,magnetic_moments)
         ρ_cons = DFTK.ArrayAndConstraints(ρ0,basis)
@@ -56,7 +56,7 @@ function run_iron_constrain()
                     0.0 1.0 0.0;
                     0.0 0.0 1.0]
     model = model_PBE(lattice, atoms, positions;
-                      temperature=0.01, magnetic_moments)
+                      temperature=0.01, magnetic_moments,symmetries=false)
     model = convert(Model{Float64}, model)
 
     idx = 1
@@ -67,6 +67,8 @@ function run_iron_constrain()
     idx = 1
     initial_optimize = true
 
+    Ecut = 10
+    kgrid = [2,2,2]
     # basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
     
     cons_infos = []
@@ -77,10 +79,9 @@ function run_iron_constrain()
     for spin in [1.6]
         constraints = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,r_cut),DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
         basis = initial_lambda(model,constraints,magnetic_moments,initial_optimize)
+        
         # ρ0 = guess_density(basis,magnetic_moments)
         # scfres = DFTK.density_mixed_constrained(basis; tol=1.0e-10,ρ=ρ0,maxiter=100,damping=α)
-
-
 
 
     end
