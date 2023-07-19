@@ -33,7 +33,7 @@ function run_iron_constrain()
     Fe = ElementPsp(iron_bcc.atnum, psp=load_psp("hgh/lda/Fe-q8.hgh"))
     atoms, positions = [Fe,Fe], [zeros(3),0.5.*ones(3)]
     magnetic_moments = [2.0,2.0]
-    a = 5.42352*0.99
+    a = 5.42352
     lattice = a .* [1.0 0.0 0.0;
                     0.0 1.0 0.0;
                     0.0 0.0 1.0]

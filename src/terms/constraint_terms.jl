@@ -42,10 +42,12 @@ function (dm_constraints::DensityMixingConstraint)(basis::PlaneWaveBasis)
     return TermDensityMixingConstraint(Constraints(dm_constraints.cons_vec,basis))
 end
 
-@timing "ene_ops: constraint" function ene_ops(term::TermDensityMixingConstraint,basis,ψ,occupation;ρ::Array,cons_lambdas,kwargs...)
+@timing "ene_ops: constraint" function ene_ops(term::TermDensityMixingConstraint,basis,ψ,occupation;ρ::Array,cons_lambdas=nothing,kwargs...)
 
-    #update the constraints
-    term.constraints.lambdas = cons_lambdas
+    #update the constraints if cons_lambdas is specified, otherwise use the basis values for the lagrange multiplier
+    if !isnothing(cons_lambdas)
+        term.constraints.lambdas = cons_lambdas
+    end
 
     current_charges = integrate_atomic_functions(total_density(ρ),term.constraints,1)
     current_spins   = integrate_atomic_functions(spin_density(ρ) ,term.constraints,2)

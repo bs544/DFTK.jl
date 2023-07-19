@@ -50,8 +50,8 @@ function run_iron_constrain()
     # Produce reference data and guess for this configuration
     Fe = ElementPsp(iron_bcc.atnum, psp=load_psp("hgh/lda/Fe-q8.hgh"))
     atoms, positions = [Fe,Fe], [zeros(3),0.5.*ones(3)]
-    magnetic_moments = [2.0,2.0]
-    a = 5.42352*0.99
+    magnetic_moments = [4.0,4.0]
+    a = 5.42352
     lattice = a .* [1.0 0.0 0.0;
                     0.0 1.0 0.0;
                     0.0 0.0 1.0]
@@ -65,7 +65,8 @@ function run_iron_constrain()
     r_cut = 2.0
     α = 0.8
     idx = 1
-    initial_optimize = true
+    initial_optimize = false
+    λ_tol = 1e-7
 
     Ecut = 10
     kgrid = [2,2,2]
@@ -74,14 +75,14 @@ function run_iron_constrain()
     cons_infos = []
     energies = []
     n_steps = []
-    V = nothing
     # ρ0 = guess_density(basis,magnetic_moments)
     for spin in [1.6]
         constraints = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=spin,r_cut),DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
-        basis = initial_lambda(model,constraints,magnetic_moments,initial_optimize)
-        
-        # ρ0 = guess_density(basis,magnetic_moments)
-        # scfres = DFTK.density_mixed_constrained(basis; tol=1.0e-10,ρ=ρ0,maxiter=100,damping=α)
+        basis = initial_lambda(model,constraints,magnetic_moments,initial_optimize;Ecut,kgrid)
+        ρ0 = guess_density(basis,magnetic_moments)
+        res= DFTK.scf_constrained_innerloop(basis;ρ=ρ0,tol=1.0e-10,damping=α,λ_tol)
+        constraints= res.constraints
+        println(constraints.current_values)
 
 
     end
