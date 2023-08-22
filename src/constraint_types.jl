@@ -48,7 +48,7 @@ mutable struct Constraints
     overlap_charge:: Array{Float64,2}   #overlap matrix for the different atomic functions
     overlap_spin  :: Array{Float64,2}
     at_fn_arrays  :: Array{Array{Float64,3},2} # precomputed atomic functions
-    at_deriv_arrs :: Array{Array{Float64,3},3} # precomputed atomic function derivatives
+    at_fft_arrays :: Array{Array{Float64,3},2} # precomputed atomic function fourier transforms
     res_wgt_arrs  :: Array{Float64,2}          # weights assigned to the lagrange multiplier updates
     lambdas       :: Array{Number,2}           # lagrange multipliers, setting as number for ForwardDiff
     is_constrained:: Array{Int64,2}            # mask for whether a constraint is applied
@@ -59,7 +59,8 @@ end
 
 function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constraints
     atomic_fns = get_at_function_arrays(cons_vec,basis)
-    atomic_derivs = get_deriv_at_fn_arrays(cons_vec,basis)
+    at_fft_fns = map(x->fft(basis,x),atomic_fns)
+    # atomic_derivs = get_deriv_at_fn_arrays(cons_vec,basis)
     overlap_charge,overlap_spin = calculate_overlap(atomic_fns,basis.dvol)
 
     res_wgt_arrs  = zeros(Float64,(length(cons_vec),2))
@@ -81,7 +82,7 @@ function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constr
         end
     end
 
-    return Constraints(cons_vec,overlap_charge,overlap_spin,atomic_fns,atomic_derivs,res_wgt_arrs,lambdas,is_constrained,target_values,current_values,basis.dvol)
+    return Constraints(cons_vec,overlap_charge,overlap_spin,atomic_fns,at_fft_fns,res_wgt_arrs,lambdas,is_constrained,target_values,current_values,basis.dvol)
 end
 
 function periodic_vect(r::AbstractVector,basis::PlaneWaveBasis)::AbstractVector

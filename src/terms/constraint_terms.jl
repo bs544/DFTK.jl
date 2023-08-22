@@ -95,22 +95,37 @@ apply_kernel(term::TermDensityMixingConstraint,args...;kwargs...) = nothing
 
 @timing "forces: constraint" function compute_forces(term::TermDensityMixingConstraint, basis::PlaneWaveBasis{TT},
     ψ, occupation; ρ, kwargs...) where {TT}
-# T = promote_type(TT, real(eltype(ψ[1])))
-# model = basis.model
-# recip_lattice = model.recip_lattice
-# ρ_fourier = fft(basis, total_density(ρ))
+    # follow on from the local force computation and the suggested implementation of forces in the potential mixing cDFT paper
+    # E = ∑_i ∑_G λⁱ wⁱ(G) * ρ(G)
+    # F_i = ∑_G λⁱ G wⁱ(G) * ρ(G)
 
-# # energy = sum of form_factor(G) * struct_factor(G) * rho(G)
-# # where struct_factor(G) = e^{-i G·r}
-# forces = [zero(Vec3{T}) for _ in 1:length(model.positions)]
-# for group in model.atom_groups
-# element = model.atoms[first(group)]
-# form_factors = [Complex{T}(local_potential_fourier(element, norm(G)))
-# for G in G_vectors_cart(basis)]
-# for idx in group
-# r = model.positions[idx]
-# forces[idx] = _force_local_internal(basis, ρ_fourier, form_factors, r)
-# end
-# end
-# forces
+    charge_fourier = fft(basis,total_density(ρ))
+    spin_fourier   = fft(basis, spin_density(ρ))
+    T = promote_type(TT, real(eltype(ψ[1])))
+    
+    forces = [zero(Vec3{T}) for _ in 1:length(model.positions)]
+
+
+    for (i,cons) in enumerate(term.constraints.cons_vec)
+        idx = cons.idx
+        if cons.charge
+            f = zero(Vec3(T))
+            weight = term.constraints.at_fft_arrays[i,1]
+            for (iG,G) in enumerate(G_vectors(basis))
+                f -= real(conj(charge_fourier[iG]).*(-2T(π)).* G .* im .* weight[iG] ./ sqrt(basis.model.unit_cell_volume))
+            end
+            forces[idx] += f
+        end
+        if cons.spin
+            f = zero(Vec3(T))
+            weight = term.constraints.at_fft_arrays[i,2]
+            for (iG,G) in enumerate(G_vectors(basis))
+                f -= real(conj(spin_fourier[iG]).*(-2T(π)).* G .* im ./ sqrt(basis.model.unit_cell_volume))
+            end
+            forces[idx] += f
+        end
+    end
+    return forces
 end
+
+
