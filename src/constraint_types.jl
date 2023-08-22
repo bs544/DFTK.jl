@@ -48,6 +48,7 @@ mutable struct Constraints
     overlap_charge:: Array{Float64,2}   #overlap matrix for the different atomic functions
     overlap_spin  :: Array{Float64,2}
     at_fn_arrays  :: Array{Array{Float64,3},2} # precomputed atomic functions
+    at_deriv_arrs :: Array{Array{Float64,3},3} # precomputed atomic function derivatives
     res_wgt_arrs  :: Array{Float64,2}          # weights assigned to the lagrange multiplier updates
     lambdas       :: Array{Number,2}           # lagrange multipliers, setting as number for ForwardDiff
     is_constrained:: Array{Int64,2}            # mask for whether a constraint is applied
@@ -58,6 +59,7 @@ end
 
 function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constraints
     atomic_fns = get_at_function_arrays(cons_vec,basis)
+    atomic_derivs = get_deriv_at_fn_arrays(cons_vec,basis)
     overlap_charge,overlap_spin = calculate_overlap(atomic_fns,basis.dvol)
 
     res_wgt_arrs  = zeros(Float64,(length(cons_vec),2))
@@ -79,11 +81,15 @@ function Constraints(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Constr
         end
     end
 
-    return Constraints(cons_vec,overlap_charge,overlap_spin,atomic_fns,res_wgt_arrs,lambdas,is_constrained,target_values,current_values,basis.dvol)
+    return Constraints(cons_vec,overlap_charge,overlap_spin,atomic_fns,atomic_derivs,res_wgt_arrs,lambdas,is_constrained,target_values,current_values,basis.dvol)
 end
 
-function periodic_dist(r::AbstractVector{Float64},basis::PlaneWaveBasis)::Float64
-    #presumably a way better way of doing this somehow
+function periodic_vect(r::AbstractVector,basis::PlaneWaveBasis)::AbstractVector
+    """
+    generate possible vectors based on unit cell translations (27 in total)
+    return the one with the minimum distance
+    there's likely a better way of doing this, but it only needs to be done once, so hopefully it's not too much bother
+    """
     red_vector = vector_cart_to_red(basis.model,r)
     #the closest image will be in one of the 27 unit cells, so just focus on them
     disp = [1.0,0.0,-1.0]
@@ -94,8 +100,11 @@ function periodic_dist(r::AbstractVector{Float64},basis::PlaneWaveBasis)::Float6
     red_vector_options = map(x->x+red_vector,cell_disp)
     red_vector_options = vector_red_to_cart.(basis.model,red_vector_options)
     red_vector_dists = norm.(red_vector_options)
-    return minimum(red_vector_dists)
+    red_vector_idx = findmin(red_vector_dists)[2]
+    return red_vector_options[red_vector_idx]
 end
+
+periodic_dist(r::AbstractVector{Float64},basis::PlaneWaveBasis) = norm(periodic_vect(r,basis))
 
 function weight_fn(r::AbstractVector{Float64},cons::Constraint,basis::PlaneWaveBasis)::Float64
     at_r = periodic_dist(r-cons.atom_pos,basis)
@@ -108,6 +117,19 @@ function weight_fn(r::AbstractVector{Float64},cons::Constraint,basis::PlaneWaveB
         return x^2 * (3 + x*(1 + x*( -6 + 3*x)))
     end
 end
+
+function weight_fn_deriv(f::AbstractVector,cons::Constraint,basis::PlaneWaveBasis)::AbstractVector
+    at_r = periodic_vect(r-cons.atom_pos,basis)
+    dist = norm(at_r)
+    at_r /= dist
+    if dist > cons.r_cut || dist < cons.r_cut-cons.r_sm
+        return 0.0
+    else
+        x = (cons.r_cut-dist)/cons.r_sm
+        fact = -x*(6_x*(3_x*(-24+15*x)))/cons.r_sm
+        return fact*at_r
+    end
+end     
 
 function get_at_function_arrays(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Array{Array{Float64,3},2}
     """
@@ -132,6 +154,37 @@ function get_at_function_arrays(cons_vec::Vector{Constraint},basis::PlaneWaveBas
     end
     return weights
 end
+
+function get_deriv_at_fn_arrays(cons_vec::Vector{Constraint},basis::PlaneWaveBasis)::Array{Array{Number,3},2}
+    """
+    calculate the derivative of the atomic weights w.r.t position and store in an array of arrays
+    """
+    r_vecs = collect(r_vectors_cart(basis))
+
+    asize = size(r_vecs)
+
+    cons_asize = (1:length(cons_vec),1:2,1:3) #final dimension is for x,y and z derivatives
+
+    weights = [zeros(Float64,asize) for (i,j,k) in Iterators.product(cons_asize...)]
+
+    for (i,cons) in enumerate(cons_vec)
+        dx_arr = zeros(Float64,asize)
+        dy_arr = zeros(Float64,asize)
+        dz_arr = zeros(Float64,asize)
+        for j in eachindex(r_vecs)
+            dx_arr[j], dy_arr[j], dz_arr[j] = weight_fn_deriv(r_vecs[j],cons,basis)
+        end
+        if cons.charge
+            weights[i,1,:] = [dx_arr,dy_arr,dz_arr]
+        end
+        if cons.spin
+            weights[i,1,:] = [dx_arr,dy_arr,dz_arr]
+        end
+    end
+
+    return weights
+end
+
 
 function calculate_overlap(atom_fns::Array{Array{Float64,3},2},dvol::Float64)::Tuple{Array{Float64,2},Array{Float64,2}}
     """
