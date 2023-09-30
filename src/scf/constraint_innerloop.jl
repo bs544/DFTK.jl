@@ -92,7 +92,14 @@ function dielectric_operator(δρ,basis,ρ,ham,ψ,occupation,εF,eigenvalues)
     return δρ - χ0δV
 end
 
-function second_deriv_wrt_lagrange(λ,constraints,interacting=false;basis,ρ,ham,ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,tol=nothing,nbandsalg=nothing,fermialg=nothing,eigensolver=lobpcg_hyper)
+function second_deriv_wrt_lagrange(λ,constraints,detail="approximate";basis,ρ,ham,ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,tol=nothing,nbandsalg=nothing,fermialg=nothing,eigensolver=lobpcg_hyper,mixing=nothing)
+
+    @assert detail ∈ ["approximate","noninteracting","interacting"]
+    # level of effort requested to calculate the second derivative
+    # approximate uses the preconditioner for the density mixing
+    # noninteracting uses the apply_χ0 function
+    # interacting calculates the full application of the dielectric ε
+
 
     lambdas = vector_2_lambdas(λ,constraints)
     if nothing in [ψ,occupation,εF,eigenvalues]
@@ -106,10 +113,17 @@ function second_deriv_wrt_lagrange(λ,constraints,interacting=false;basis,ρ,ham
     end
 
     ε(arr) = dielectric_operator(arr,basis,ρ,ham,ψ,occupation,εF,eigenvalues)
+    if detail == "approximate"
+        χ0wᵢ(at_fn) = mixing_density(mixing,basis,at_fn;ρ,εF,eigenvalues,occupation,ψ)
+        interacting = false
+    else
+        χ0wᵢ(at_fn) = apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn)
+        interacting = (detail=="interacting")
+    end 
 
     at_fn_arrs = get_4d_at_fns(constraints)
     at_fns = lambdas_2_vector(at_fn_arrs,constraints)
-    χ0_at_fns = [apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn) for at_fn in at_fns]
+    χ0_at_fns = [χ0wᵢ(at_fn) for at_fn in at_fns]
     if interacting
         # apply the inverse of ε(arr) to χ0_at_fn(=∫χ0(x,x')wᵢ(x')dx') to get χwᵢ
         inv_εs = [linsolve(arr->ε(arr),χ0_at_fn,verbosity=3)[1] for χ0_at_fn in χ0_at_fns]

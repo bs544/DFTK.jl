@@ -48,7 +48,7 @@ mutable struct Constraints
     overlap_charge:: Array{Float64,2}   #overlap matrix for the different atomic functions
     overlap_spin  :: Array{Float64,2}
     at_fn_arrays  :: Array{Array{Float64,3},2} # precomputed atomic functions
-    at_fft_arrays :: Array{Array{Float64,3},2} # precomputed atomic function fourier transforms
+    at_fft_arrays :: Array{Array{ComplexF64,3},2} # precomputed atomic function fourier transforms
     res_wgt_arrs  :: Array{Float64,2}          # weights assigned to the lagrange multiplier updates
     lambdas       :: Array{Number,2}           # lagrange multipliers, setting as number for ForwardDiff
     is_constrained:: Array{Int64,2}            # mask for whether a constraint is applied
