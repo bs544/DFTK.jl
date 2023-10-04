@@ -273,7 +273,7 @@ The constraining lagrange multipliers are found in an inner loop using the Newto
     compute_consistent_energies=true,
     initial_lambdas=nothing,
     response=ResponseOptions(),  # Dummy here, only for AD
-    λ_tol= 1e-5 # tolerance for constraining lagrange multipliers in inner loop
+    λ_tol= 1e-5, # tolerance for constraining lagrange multipliers in inner loop
     inner_loop_printing=false # print results of the inner loop
 ) where {T}
     # All these variables will get updated by fixpoint_map
