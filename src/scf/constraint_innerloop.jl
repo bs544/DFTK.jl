@@ -186,7 +186,7 @@ function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,
     return E, deriv_array, Hessian
 end
 
-function innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing)
+function innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,display_results=false)
     """
     Find the value for the Lagrange Multipliers that satisfies the constraints kept in basis.
     Beyond the expected inputs needed to form and diagonalise the Hamiltonian, the two other inputs are:
@@ -217,8 +217,10 @@ function innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_H
                                    iterations=max_cons_iter,show_trace=false,inplace=true,x_tol=λ_tol)
     new_lambdas= Optim.x_trace(optim_results)[end]
 
-    # println(optim_results)
-    # println(Optim.x_trace(optim_results))
+    if display_results
+        println(optim_results)
+    end
+    
     new_lambdas = vector_2_lambdas(new_lambdas,constraints)
     update_constraints!(basis,new_lambdas)
     push!(n_Ham_diags,Optim.f_calls(optim_results))#use this as a proxy for the number of Hamiltonian diagonalisations needed for λ convergence
@@ -272,6 +274,7 @@ The constraining lagrange multipliers are found in an inner loop using the Newto
     initial_lambdas=nothing,
     response=ResponseOptions(),  # Dummy here, only for AD
     λ_tol= 1e-5 # tolerance for constraining lagrange multipliers in inner loop
+    inner_loop_printing=false # print results of the inner loop
 ) where {T}
     # All these variables will get updated by fixpoint_map
     if !isnothing(ψ)
@@ -301,7 +304,7 @@ The constraining lagrange multipliers are found in an inner loop using the Newto
         n_Ham_diags = info.n_Ham_diags
         diagtol = determine_diagtol(info)
         max_cons_iter = 20
-        innerloop!(ρin,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;ψ,occupation,εF,eigenvalues)
+        innerloop!(ρin,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;ψ,occupation,εF,eigenvalues,display_results=inner_loop_printing)
         # Note that ρin is not the density of ψ, and the eigenvalues
         # are not the self-consistent ones, which makes this energy non-variational
         energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρin, eigenvalues, εF)
