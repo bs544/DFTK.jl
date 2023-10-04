@@ -158,7 +158,7 @@ function second_deriv_wrt_lagrange(λ,constraints,detail="approximate";basis,ρ,
     return Hessian
 end
 
-function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,eigensolver=lobpcg_hyper,nbandsalg,fermialg,tol=0.003,constraints,do_hessian=true,do_grad=true)
+function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,eigensolver=lobpcg_hyper,nbandsalg,fermialg,tol=0.003,constraints,do_hessian=true,do_grad=true,detail="noninteracting")
     """
     Convert the λ vector to the array used by the constraints
     Generate the Hamiltonian and diagonalise it
@@ -178,7 +178,7 @@ function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,
     deriv_array ./= weights
     deriv_array = do_grad ? lambdas_2_vector(deriv_array,constraints) : nothing
     
-    Hessian = do_hessian ? second_deriv_wrt_lagrange(λ,constraints;basis,ρ=ρout,ham,ψ,occupation,εF,eigenvalues) : nothing
+    Hessian = do_hessian ? second_deriv_wrt_lagrange(λ,constraints,detail;basis,ρ=ρout,ham,ψ,occupation,εF,eigenvalues) : nothing
 
     return E, deriv_array, Hessian
 end
