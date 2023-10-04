@@ -113,17 +113,20 @@ function second_deriv_wrt_lagrange(λ,constraints,detail="approximate";basis,ρ,
     end
 
     ε(arr) = dielectric_operator(arr,basis,ρ,ham,ψ,occupation,εF,eigenvalues)
-    if detail == "approximate"
-        χ0wᵢ(at_fn) = mixing_density(mixing,basis,at_fn;ρ,εF,eigenvalues,occupation,ψ)
-        interacting = false
-    else
-        χ0wᵢ(at_fn) = apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn)
-        interacting = (detail=="interacting")
-    end 
+
 
     at_fn_arrs = get_4d_at_fns(constraints)
     at_fns = lambdas_2_vector(at_fn_arrs,constraints)
-    χ0_at_fns = [χ0wᵢ(at_fn) for at_fn in at_fns]
+    if detail == "approximate"
+        # χ0wᵢ(at_fn) = mixing_density(mixing,basis,at_fn;ρ,εF,eigenvalues,occupation,ψ)
+        interacting = false
+        χ0_at_fns = [mixing_density(mixing,basis,at_fn;ρ,εF,eigenvalues,occupation,ψ) for at_fn in at_fns]
+    else
+        # χ0wᵢ(at_fn) = apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn) # this broke the compilation, so I just did everything in this
+        interacting = (detail=="interacting")
+        χ0_at_fns = [apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn) for at_fn in at_fns]
+    end
+    # χ0_at_fns = [χ0wᵢ(at_fn) for at_fn in at_fns]
     if interacting
         # apply the inverse of ε(arr) to χ0_at_fn(=∫χ0(x,x')wᵢ(x')dx') to get χwᵢ
         inv_εs = [linsolve(arr->ε(arr),χ0_at_fn,verbosity=3)[1] for χ0_at_fn in χ0_at_fns]
