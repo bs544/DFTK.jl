@@ -1,3 +1,88 @@
+
+function lambdas_2_vector(lambdas,constraints::Constraints)
+  """
+  For the purposes of minimisation, the lambdas array needs to be a vector of only the elements that are being constrained
+  """
+  T = typeof(lambdas[1])
+  T = T<:Int ? Number : T #generalise if T is an integer, since this can happen if lambdas[1] is 0
+  λ = Vector{T}(undef,sum(constraints.is_constrained))
+  idx = 1
+  for i in eachindex(lambdas)
+      if constraints.is_constrained[i]==1
+          λ[idx] = lambdas[i]
+          idx +=1
+      end
+  end
+  @assert idx-1 == sum(constraints.is_constrained)
+  return λ
+end
+
+function vector_2_lambdas(λ,constraints::Constraints)
+  """
+  turn the vector back to the array
+  """
+  lambdas = zeros(Number,size(constraints.is_constrained))
+  idx = 1
+  for i in eachindex(lambdas)
+      if constraints.is_constrained[i]==1
+          lambdas[i]= λ[idx]
+          idx += 1
+      end
+  end
+  return lambdas
+end
+
+function precondition(lambda_grads,constraints,detail;ham,basis,ρ,εF,eigenvalues,occupation,ψ,mixing=nothing)
+  """
+  precondition the Lagrange multiplier gradients.
+  If detail is "approximate" then the same preconditioning is used as in the density mixing
+  If detail is "noninteracting" then the preconditioning is the inverse susceptibility which seems to be the actual second derivative.
+  """
+  @assert detail ∈ ["approximate","noninteracting"]
+
+  grad_vec = lambdas_2_vector(lambda_grads,constraints)
+
+  #first get (approximate) second derivative for the vector of gradients
+  at_fns_arr = get_4d_at_fns(constraints)
+  at_fns = lambdas_2_vector(at_fns_arr,constraints)
+
+  if detail=="approximate"
+    χ0_af_fns = [mixing_density(mixing,basis,at_fn;ρ,εF,eigenvalues,occupation,ψ) for at_fn in at_fns]
+  elseif detail=="noninteracting"
+    χ0_af_fns = [apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn) for at_fn in at_fns]
+  end
+
+  Hessian = zeros(Float64,length(at_fns),length(at_fns))
+  spin_term = [1 -1;
+              -1  1]# copying the hacky spin term thing from the constraint_innerloop.jl routine
+  spin_terms = Array{Array{Int,2},2}(undef,size(at_fn_arrs)...)
+  for i in CartesianIndices(spin_terms)
+      arr = i.I[2]==2 ? spin_term : ones(Int,2,2)
+      spin_terms[i] = arr
+  end
+  spin_terms = lambdas_2_vector(spin_terms,constraints)
+  for i = 1:length(at_fns)
+    for j = i:length(at_fns)
+        H = 0.0
+        for σ1 = 1:2
+            for σ2 = 1:2 
+                H += sum(at_fns[i][:,:,:,σ1] .* χ0_at_fns[j][:,:,:,σ2])*basis.dvol*spin_terms[i][σ1,σ2]
+            end
+        end
+        Hessian[i,j] = 0.5*H
+        Hessian[j,i] = Hessian[i,j]
+    end
+  end
+
+  #now we have the Hessian (approximate or otherwise), we can precondition by applying it to the gradient and returning it to array form
+  #This is just multiplying the gradient by the inverse Hessian (this is the main info I have on this, I should read more on this: https://arxiv.org/pdf/1804.01590.pdf)
+  prec_grad_vec = inv(Hessian)*grad_vec
+  prec_lambda_grads = vector_2_lambdas(prec_grad_vec,constraints)
+
+  return prec_lambda_grads
+
+end
+
 @doc raw"""
     density_mixed_constrained(basis; [tol, mixing, damping, ρ, ψ])
 
@@ -44,6 +129,8 @@ which is done within a combined struct ArrayAndConstraints
     callback=ScfDefaultCallback(; show_damping=false),
     compute_consistent_energies=true,
     initial_lambdas=nothing,
+    initial_lambda_optimisation=0, # If true, update only the Lagrange multipliers for the specified number of cycles to provide a decent initial guess for the rest of the SCF loop
+    lambdas_preconditioning="approximate", # Either approximate or noninteracting. Uses the second derivative calculations from constraint_innerloop.jl and the level of detail found there. 
     response=ResponseOptions(),  # Dummy here, only for AD
 ) where {T}
     # All these variables will get updated by fixpoint_map
@@ -99,7 +186,8 @@ which is done within a combined struct ArrayAndConstraints
 
         # Apply mixing and pass it the full info as kwargs
         δρ = mix_density(mixing, basis, ρout - ρin; info...)
-        δρ_cons = ArrayAndConstraints(δρ,resid.lambdas,resid.weights)
+        resid_lambdas = precondition(resid_lambdas,constraints,lambdas_preconditioning;ham,basis,ρin,εF,eigenvalues,occupation,ψ,mixing)
+        δρ_cons = ArrayAndConstraints(δρ,resid_lambdas,resid.weights)
         ρnext_cons = ρin_cons .+ T(damping) .* δρ_cons
         info = merge(info, (; ρnext_cons))
 
@@ -116,6 +204,12 @@ which is done within a combined struct ArrayAndConstraints
     if !isnothing(initial_lambdas)
       ρout_cons.lambdas = initial_lambdas
     end
+
+    if initial_lambda_optimisation > 0
+      #do an initial few steps to update the 
+      println("not implemented yet")
+    end
+
     solver(fixpoint_map, ρout_cons, maxiter; tol=eps(T))
 
     # We do not use the return value of solver but rather the one that got updated by fixpoint_map
