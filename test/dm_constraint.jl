@@ -59,7 +59,8 @@ function run_iron_constrain()
     end
 
 
-    for spin ∈ 1.5:0.1:2.7
+    for resid_weight ∈ 0.05:0.08:0.25
+        spin = 1.5
         constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
         constraint_term = DFTK.DensityMixingConstraint(constraints)
         terms = model.term_types
@@ -68,7 +69,7 @@ function run_iron_constrain()
     
         basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
         ρ0 = guess_density(basis,magnetic_moments)
-        scfres = DFTK.density_mixed_constrained(basis; solver=solver, tol=1.0e-10,ρ=ρ0,maxiter=1000,damping=α)
+        scfres = DFTK.density_mixed_constrained(basis; solver=solver, tol=1.0e-10,ρ=ρ0,maxiter=1000,damping=α,lambdas_preconditioning="noninteracting")
         DFTK.display_constraints(scfres.constraints)
         push!(energies,scfres.energies.total)
         push!(constraint_info,scfres.constraints)
