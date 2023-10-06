@@ -230,6 +230,14 @@ function get_constraints(basis::PlaneWaveBasis)::Constraints
     return nothing
 end
 
+function update_constraints!(basis::PlaneWaveBasis,lambdas)
+    for term in basis.terms
+        if :constraints in fieldnames(typeof(term))
+            term.constraints.lambdas = lambdas
+        end
+    end
+end
+
 function get_4d_at_fns(constraints::Constraints)
     """
     For each constraint get the representation of it in the spin up spin down representation,
@@ -336,4 +344,36 @@ function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBa
 end
 
 
-
+# Add these utility functions, which are used in the inner loop and density mixing cDFT approaches
+function lambdas_2_vector(lambdas,constraints::Constraints)
+    """
+    For the purposes of minimisation, the lambdas array needs to be a vector of only the elements that are being constrained
+    """
+    T = typeof(lambdas[1])
+    T = T<:Int ? Number : T #generalise if T is an integer, since this can happen if lambdas[1] is 0
+    λ = Vector{T}(undef,sum(constraints.is_constrained))
+    idx = 1
+    for i in eachindex(lambdas)
+        if constraints.is_constrained[i]==1
+            λ[idx] = lambdas[i]
+            idx +=1
+        end
+    end
+    @assert idx-1 == sum(constraints.is_constrained)
+    return λ
+  end
+  
+  function vector_2_lambdas(λ,constraints::Constraints)
+    """
+    turn the vector back to the array
+    """
+    lambdas = zeros(Number,size(constraints.is_constrained))
+    idx = 1
+    for i in eachindex(lambdas)
+        if constraints.is_constrained[i]==1
+            lambdas[i]= λ[idx]
+            idx += 1
+        end
+    end
+    return lambdas
+  end
