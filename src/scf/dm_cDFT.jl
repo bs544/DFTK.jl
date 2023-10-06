@@ -8,7 +8,7 @@ function precondition(lambda_grads,constraints,detail;ham,basis,ρin,εF,eigenva
 
   grad_vec = lambdas_2_vector(lambda_grads,constraints)
 
-  #first get (approximate) second derivative for the vector of gradients
+  #first get (approximate) second derivative for the vector of gradients, can reuse values for approximate hessian
   at_fns_arr = get_4d_at_fns(constraints)
   at_fns = lambdas_2_vector(at_fns_arr,constraints)
 
@@ -156,13 +156,7 @@ which is done within a combined struct ArrayAndConstraints
 
         # Apply mixing and pass it the full info as kwargs
         δρ = mix_density(mixing, basis, ρout - ρin; info...)
-        resid_lambdas = precondition(resid.lambdas,constraints,lambdas_preconditioning;ham,basis,ρin,εF,eigenvalues,occupation,ψ,mixing,n_iter)
-        tmp           = precondition(resid.lambdas,constraints,"approximate";ham,basis,ρin,εF,eigenvalues,occupation,ψ,mixing,n_iter)
-        resid.lambdas = resid_lambdas
-        rat = tmp[2]/resid_lambdas[2]
-        println("used: $resid_lambdas")
-        println("approx: $tmp")
-        println("ratio: $rat")
+        resid.lambdas = precondition(resid.lambdas,constraints,lambdas_preconditioning;ham,basis,ρin,εF,eigenvalues,occupation,ψ,mixing,n_iter)
         δρ_cons = ArrayAndConstraints(δρ,resid.lambdas,resid.weights)
         ρnext_cons = ρin_cons .+ T(damping) .* δρ_cons
         info = merge(info, (; ρnext_cons))

@@ -66,10 +66,10 @@ function run_iron_constrain()
         terms = model.term_types
         add_constraint!(terms,constraint_term)
         model = Model(model;terms)
-    
+        initial_lambdas = nothing # [0 0.0178]
         basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
         ρ0 = guess_density(basis,magnetic_moments)
-        scfres = DFTK.density_mixed_constrained(basis; solver=solver, tol=1.0e-10,ρ=ρ0,maxiter=1000,damping=α,lambdas_preconditioning="noninteracting")
+        scfres = DFTK.density_mixed_constrained(basis; solver=solver, tol=1.0e-10,ρ=ρ0,maxiter=1000,damping=α,lambdas_preconditioning="approximate",initial_lambdas)
         DFTK.display_constraints(scfres.constraints)
         push!(energies,scfres.energies.total)
         push!(constraint_info,scfres.constraints)
