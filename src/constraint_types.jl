@@ -277,7 +277,9 @@ ArrayAndConstraints(arr::AbstractArray,basis::PlaneWaveBasis) = ArrayAndConstrai
 Base.:+(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr + b.arr,a.lambdas+b.lambdas,a.weights)
 Base.:-(a::ArrayAndConstraints,b::ArrayAndConstraints)= ArrayAndConstraints(a.arr - b.arr,a.lambdas-b.lambdas,a.weights)
 Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.lambdas))# .* a.weights))
+# Base.vec(a::ArrayAndConstraints) = vcat(vec(a.arr),vec(a.lambdas .* a.weights))
 LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.lambdas)# .* a.weights)
+# LinearAlgebra.norm(a::ArrayAndConstraints) = norm(a.arr) + norm(a.lambdas .* a.weights)
 Base.:*(a::Number,b::ArrayAndConstraints) = ArrayAndConstraints(a.*b.arr,a.*b.lambdas,b.weights)
 Base.eltype(a::ArrayAndConstraints) = eltype(a.arr)
 spin_density(a::ArrayAndConstraints) = spin_density(a.arr)
@@ -301,6 +303,7 @@ function back_to_array(x_new::Vector{Float64},x_old::ArrayAndConstraints)::Array
     x_new_weight = x_old.weights
     x_new_λ = reshape(x_new[arr_length+1:end],size(x_old.lambdas))
     # x_new_λ ./= x_new_weight
+    # x_new_λ .*= x_new_weight
     return ArrayAndConstraints(x_new_arr,x_new_λ,x_new_weight)
 end
 
@@ -335,6 +338,7 @@ function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBa
     # this should be the only place that the weights are needed.
     # It acts effectively as a step size for the Lagrange multiplier update
     deriv_array .*= ρin_cons.weights 
+    deriv_array .*= basis.dvol
 
     weights  = constraints.res_wgt_arrs
 

@@ -65,7 +65,7 @@ function run_iron_constrain()
         idx = 2
         target = spin
         fname = "./test/constraint_spin_data_iron_pbe_rho.h5"
-        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=target,r_cut)]#,DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+        constraints     = [DFTK.Constraint(model,1,resid_weight,r_sm_frac;target_spin=target,r_cut),DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin+0.1,r_cut)]
     else
         idx = 1
         target = charge

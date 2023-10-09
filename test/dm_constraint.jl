@@ -7,7 +7,7 @@ function run_iron_constrain()
     # Produce reference data and guess for this configuration
     Fe = ElementPsp(iron_bcc.atnum, psp=load_psp("hgh/lda/Fe-q8.hgh"))
     atoms, positions = [Fe,Fe], [zeros(3),0.5.*ones(3)]
-    magnetic_moments = [4.0,4.0]
+    magnetic_moments = [4.0,3.0]
     a = 5.42352
     lattice = a .* [1.0 0.0 0.0;
                     0.0 1.0 0.0;
@@ -59,17 +59,24 @@ function run_iron_constrain()
     end
 
 
-    for resid_weight ∈ 0.05:0.08:0.25
+    for detail ∈ ["None","approximate","noninteracting"]
+        resid_weight=0.1
         spin = 1.5
-        constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin,r_cut)]
+        constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin,r_cut),DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin+0.1,r_cut)]
         constraint_term = DFTK.DensityMixingConstraint(constraints)
         terms = model.term_types
         add_constraint!(terms,constraint_term)
         model = Model(model;terms)
-        initial_lambdas = nothing # [0 0.0178]
+        initial_lambdas = [0.0 0.008; 0.0 0.0078]
         basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
+        # resid_weight *= basis.dvol
+        # constraints = DFTK.get_constraints(basis)
+        # c1_arr = constraints.at_fn_arrays[1,2]
+        # c2_arr = constraints.at_fn_arrays[2,2]
+        # println(c1_arr[1,1,:])
+        # println(c2_arr[1,1,:])
         ρ0 = guess_density(basis,magnetic_moments)
-        scfres = DFTK.density_mixed_constrained(basis; solver=solver, tol=1.0e-10,ρ=ρ0,maxiter=1000,damping=α,lambdas_preconditioning="approximate",initial_lambdas)
+        scfres = DFTK.density_mixed_constrained(basis; solver=solver, tol=1.0e-10,ρ=ρ0,maxiter=1000,damping=α,lambdas_preconditioning=detail,initial_lambdas)
         DFTK.display_constraints(scfres.constraints)
         push!(energies,scfres.energies.total)
         push!(constraint_info,scfres.constraints)

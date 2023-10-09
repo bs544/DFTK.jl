@@ -1,48 +1,82 @@
+function generate_spin_terms(at_fns_arr,constraints)
+  spin_term = [1 -1;
+              -1  1]# copying the hacky spin term thing from the constraint_innerloop.jl routine
+  spin_terms = Array{Array{Int,2},2}(undef,size(at_fns_arr)...)
+  for i in CartesianIndices(spin_terms)
+    arr = i.I[2]==2 ? spin_term : ones(Int,2,2)
+    spin_terms[i] = arr
+  end
+  spin_terms = lambdas_2_vector(spin_terms,constraints)
+  return spin_terms
+end
+
+function constrained_second_deriv(ham,basis,εF,eigenvalues,occupation,ψ,constraints,ρ,n_iter,mixing,detail)
+  """
+  Generate the second derivative matrix for the energy with respect to the Lagrange multipliers
+  Use the noninteracting susceptibility for this:
+    Hᵢⱼ = 1/2 ∑ₛₛ' ∫ wˢᵢ(r)χ₀(r,r')wˢ'ⱼ(r') dr dr'
+  """
+
+
+  at_fns_arr = get_4d_at_fns(constraints)
+  at_fns_vec = lambdas_2_vector(at_fns_arr,constraints)
+  if detail == "None"
+    Hessian = Matrix{Float64}(I,length(at_fns_vec),length(at_fns_vec))
+    return Hessian
+  end
+  multiplier = 1.0 # the hessian is negative for the noninteracting case for some reason, need to figure this out.
+
+  if detail=="noninteracting"
+    χ0_at_fns = [apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn) for at_fn in at_fns_vec]
+    multiplier = -1.0
+  elseif detail == "approximate"
+    χ0_at_fns = [mix_density(mixing,basis,at_fn;ρin=ρ,εF,eigenvalues,occupation,ψ,n_iter) for at_fn in at_fns_vec]
+  end
+
+  # ham = energy_hamiltonian(basis, ψ, occupation; ρ, eigenvalues, εF, cons_lambdas=constraints.lambdas).ham
+  # ψ, eigenvalues, occupation, εF, ρ = next_density(ham, AdaptiveBands(basis.model), default_fermialg(basis.model); eigensolver=lobpcg_hyper, ψ, eigenvalues,
+  #                                                        occupation, miniter=1, tol=0.003)
+
+  # χ_1 = apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fns_vec[1])
+  # χ_2 = apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fns_vec[2])
+  # println(at_fns_vec[1][1,1,:,1])
+  # println(at_fns_vec[2][1,1,:,1])
+  # println(χ_1[1,1,:,2])
+  # println(χ_2[1,1,:,2])
+
+  Hessian = zeros(Float64,length(at_fns_vec),length(at_fns_vec))
+  spin_terms = generate_spin_terms(at_fns_arr,constraints)
+
+  for i = 1:length(at_fns_vec)
+    for j = i:length(at_fns_vec)
+      H = 0.0
+      for σ1 = 1:2
+        for σ2 = 1:2
+          H += sum(at_fns_vec[i][:,:,:,σ1] .* χ0_at_fns[j][:,:,:,σ2])*basis.dvol*spin_terms[i][σ1,σ2]
+        end
+      end
+      Hessian[i,j] = 0.5*H*multiplier
+      Hessian[j,i] = Hessian[i,j]
+    end
+  end
+
+  return Hessian
+end
+
+
 function precondition(lambda_grads,constraints,detail;ham,basis,ρin,εF,eigenvalues,occupation,ψ,mixing=nothing,n_iter)
   """
   precondition the Lagrange multiplier gradients.
   If detail is "approximate" then the same preconditioning is used as in the density mixing
   If detail is "noninteracting" then the preconditioning is the inverse susceptibility which seems to be the actual second derivative.
   """
-  @assert detail ∈ ["approximate","noninteracting"]
+  @assert detail ∈ ["approximate","noninteracting","None"]
 
   grad_vec = lambdas_2_vector(lambda_grads,constraints)
 
   #first get (approximate) second derivative for the vector of gradients, can reuse values for approximate hessian
-  at_fns_arr = get_4d_at_fns(constraints)
-  at_fns = lambdas_2_vector(at_fns_arr,constraints)
-
-  if detail=="approximate"
-    χ0_at_fns = [mix_density(mixing,basis,at_fn;ρin,εF,eigenvalues,occupation,ψ,n_iter) for at_fn in at_fns]
-  elseif detail=="noninteracting"
-    χ0_at_fns = [apply_χ0(ham,ψ,occupation,εF,eigenvalues,at_fn) for at_fn in at_fns]
-  end
-
-  Hessian = zeros(Float64,length(at_fns),length(at_fns))
-  spin_term = [1 -1;
-              -1  1]# copying the hacky spin term thing from the constraint_innerloop.jl routine
-  spin_terms = Array{Array{Int,2},2}(undef,size(at_fns_arr)...)
-  for i in CartesianIndices(spin_terms)
-      arr = i.I[2]==2 ? spin_term : ones(Int,2,2)
-      spin_terms[i] = arr
-  end
-  spin_terms = lambdas_2_vector(spin_terms,constraints)
-  for i = 1:length(at_fns)
-    for j = i:length(at_fns)
-        H = 0.0
-        for σ1 = 1:2
-            for σ2 = 1:2 
-                H += sum(at_fns[i][:,:,:,σ1] .* χ0_at_fns[j][:,:,:,σ2])*basis.dvol*spin_terms[i][σ1,σ2]
-            end
-        end
-        Hessian[i,j] = 0.5*H
-        Hessian[j,i] = Hessian[i,j]
-    end
-  end
-
-  if detail=="noninteracting"
-    Hessian .*= -1
-  end
+  Hessian = constrained_second_deriv(ham,basis,εF,eigenvalues,occupation,ψ,constraints,ρin,n_iter,mixing,detail)
+  
   #now we have the Hessian (approximate or otherwise), we can precondition by applying it to the gradient and returning it to array form
   #This is just multiplying the gradient by the inverse Hessian (this is the main info I have on this, I should read more on this: https://arxiv.org/pdf/1804.01590.pdf)
   prec_grad_vec = inv(Hessian)*grad_vec
@@ -126,6 +160,7 @@ which is done within a combined struct ArrayAndConstraints
 
         ρin = ρin_cons.arr
         constraints = get_constraints(basis)
+        constraints.lambdas = ρin_cons.lambdas
 
         # Note that ρin is not the density of ψ, and the eigenvalues
         # are not the self-consistent ones, which makes this energy non-variational
@@ -138,6 +173,7 @@ which is done within a combined struct ArrayAndConstraints
         ψ, eigenvalues, occupation, εF, ρout = nextstate
 
         resid = residual(ρout,ρin_cons,basis)
+        println(resid.lambdas)
         ρout_cons = resid + ρin_cons
 
         # Update info with results gathered so far
