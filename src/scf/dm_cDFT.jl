@@ -81,6 +81,9 @@ function precondition(lambda_grads,constraints,detail;ham,basis,ρin,εF,eigenva
   #This is just multiplying the gradient by the inverse Hessian (this is the main info I have on this, I should read more on this: https://arxiv.org/pdf/1804.01590.pdf)
   prec_grad_vec = inv(Hessian)*grad_vec
   prec_lambda_grads = vector_2_lambdas(prec_grad_vec,constraints)
+  println(inv(Hessian))
+  println(grad_vec)
+  println(prec_grad_vec)
 
   return prec_lambda_grads
 

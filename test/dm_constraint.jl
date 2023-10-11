@@ -58,16 +58,21 @@ function run_iron_constrain()
         end
     end
 
-
-    for detail ∈ ["None","approximate","noninteracting"]
-        resid_weight=0.1
+    # detail | resid_weight | # steps
+    # None   | 0.5          | 31
+    # approx | 0.5          | 51
+    # nonint | 38,39,42|41,40 => no difference
+    # for detail ∈ ["None","approximate","noninteracting"]
+        # resid_weight=0.5
+    for resid_weight in [0.7,0.7]
+        detail = "noninteracting"
         spin = 1.5
         constraints = [DFTK.Constraint(model,idx,resid_weight,r_sm_frac;target_spin=spin,r_cut),DFTK.Constraint(model,2,resid_weight,r_sm_frac;target_spin=spin+0.1,r_cut)]
         constraint_term = DFTK.DensityMixingConstraint(constraints)
         terms = model.term_types
         add_constraint!(terms,constraint_term)
         model = Model(model;terms)
-        initial_lambdas = [0.0 0.008; 0.0 0.0078]
+        initial_lambdas = nothing #[0.0 0.008; 0.0 0.0078]
         basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
         # resid_weight *= basis.dvol
         # constraints = DFTK.get_constraints(basis)

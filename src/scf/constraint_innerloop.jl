@@ -177,8 +177,7 @@ function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,
                                                         occupation, miniter=1, tol)
     E = W_λ(ham,basis,ρout,ρ,ψ,occupation,eigenvalues,εF,lambdas)
 
-    deriv_array = residual(ρout,ArrayAndConstraints(ρ,lambdas,weights),basis).lambdas
-    deriv_array ./= weights
+    deriv_array = get_density_deviation(ρout,basis)
     deriv_array = do_grad ? lambdas_2_vector(deriv_array,constraints) : nothing
     
     Hessian = do_hessian ? second_deriv_wrt_lagrange(λ,constraints,detail;basis,ρ=ρout,ham,ψ,occupation,εF,eigenvalues) : nothing
