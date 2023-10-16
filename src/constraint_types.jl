@@ -257,6 +257,19 @@ function get_4d_at_fns(constraints::Constraints)
     return at_fn_arrs
 end
 
+function get_overlap(constraints::Constraints)
+    """
+    Create the overlap matrix for the flattened array of constraints.
+    I expect that the spin and charge constraints are orthogonal, so this will be a block diagonal
+    This is because the constraint arrays have shape (length(cons_vec),2)
+    """
+    l = length(constraints.cons_vec)
+    S = zeros(Float64,2*l,2*l)
+    S[begin:l,begin:l] = constraints.overlap_charge
+    S[l+1:end,l+1:end] = constraints.overlap_spin
+    return S
+end
+
 
 mutable struct ArrayAndConstraints
     """
@@ -309,6 +322,22 @@ end
 
 back_to_array(x_new::AbstractVector,x_old::AbstractArray) = reshape(x_new,size(x_old))
 
+function apply_overlap(x::AbstractVector,overlap::Array,n_Lagrange::Int)
+    """
+    Apply the overlap matrix to the final n_lagrange elements of the vector
+    """
+    x[end-n_Lagrange+1:end] = overlap*x[end-n_Lagrange+1:end]
+    return x
+end
+
+function apply_overlap(x::AbstractArray,overlap::Array,n_Lagrange::Int)
+    s = size(x)
+    for i = 1:s[2]
+        x[:,i] = apply_overlap(x[:,i],overlap,n_Lagrange)
+    end
+    return x
+end
+
 function get_density_deviation(ρout::Array,basis::PlaneWaveBasis)
     """
     Get the deviation of the output density from the constraint target values
@@ -345,18 +374,21 @@ function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBa
     constraints = get_constraints(basis)
 
     deriv_array = get_density_deviation(ρout,basis)
-
+    deriv_array_prnt = lambdas_2_vector(deriv_array,constraints)
+    println("log: Raw gradient: $deriv_array_prnt")
 
     # this should be the only place that the weights are needed.
     # It acts effectively as a step size for the Lagrange multiplier update
     #getting this to be similar to the potential mixing approach, you need to multiply by the square root of the overlap matrix
     if apply_overlap
-        S_c_inv_sqrt,S_s_inv_sqrt = overlap_inv_sqrt(constraints)
-        deriv_array[:,1] = S_c_inv_sqrt*deriv_array[:,1]
-        deriv_array[:,2] = S_s_inv_sqrt*deriv_array[:,2]
+        S_c_inv,S_s_inv = overlap_inv(constraints)
+        deriv_array[:,1] = S_c_inv*deriv_array[:,1]
+        deriv_array[:,2] = S_s_inv*deriv_array[:,2]
     end
     deriv_array .*= ρin_cons.weights 
     # deriv_array .*= basis.dvol
+    deriv_array_prnt = lambdas_2_vector(deriv_array,constraints)
+    println("log: Weighted and overlapped gradient: $deriv_array_prnt")
 
     weights  = constraints.res_wgt_arrs
 
@@ -365,9 +397,11 @@ function residual(ρout::Array,ρin_cons::ArrayAndConstraints,basis::PlaneWaveBa
     return ArrayAndConstraints(arr,deriv_array,weights)
 end
 
-function overlap_inv_sqrt(constraints)
+overlap_inv_sqrt(constraints::Constraints) = sqrt(overlap_inv(constraints))
+
+function overlap_inv(constraints::Constraints)
     """
-    We need the inverse square root of the overlaps, but only for the terms that are actually present, so shrink the matrices to the constrained elements and then expand back
+    We need the inverse of the overlaps, but only for the terms that are actually present, so shrink the matrices to the constrained elements and then expand back
     """
     n_constraints = length(constraints.cons_vec)
     chrg_const_eles = [i for i in 1:n_constraints if constraints.is_constrained[i,1]==1]
@@ -376,8 +410,8 @@ function overlap_inv_sqrt(constraints)
     chrg_sub_mat = constraints.overlap_charge[chrg_const_eles,chrg_const_eles]
     spin_sub_mat = constraints.overlap_spin[spin_const_eles,spin_const_eles]
 
-    chrg_sub_mat = sqrt(inv(chrg_sub_mat))
-    spin_sub_mat = sqrt(inv(spin_sub_mat))
+    chrg_sub_mat = inv(chrg_sub_mat)
+    spin_sub_mat = inv(spin_sub_mat)
 
     larger_chrg_mat = zeros(Float64,n_constraints,n_constraints)
     larger_spin_mat = zeros(Float64,n_constraints,n_constraints)

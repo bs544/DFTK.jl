@@ -53,6 +53,26 @@ function scf_anderson_solver(m=10; kwargs...)
 end
 
 """
+constrained DFT equivalent of the anderson solver for density mixing
+"""
+function cDFT_anderson_solver(basis,m=10;kwargs...)
+    function cDFT_anderson(f,x0,max_iter;tol=1e-6)
+        T = eltype(x0)
+        x = x0
+
+        converged = false
+        acceleration = cDFTAndersonAcceleration(get_constraints(basis);m,kwargs...)
+        for n = 1:max_iter
+            residual = f(x)-x
+            converged = norm(residual) < tol
+            converged && break
+            x = acceleration(x,one(T),residual)
+        end
+        (; fixpoint=x,converged)
+    end
+end
+
+"""
 CROP-accelerated root-finding iteration for `f`, starting from `x0` and keeping
 a history of `m` steps. Optionally `warming` specifies the number of non-accelerated
 steps to perform for warming up the history.

@@ -1,3 +1,4 @@
+
 function generate_spin_terms(at_fns_arr,constraints)
   spin_term = [1 -1;
               -1  1]# copying the hacky spin term thing from the constraint_innerloop.jl routine
@@ -81,9 +82,9 @@ function precondition(lambda_grads,constraints,detail;ham,basis,ρin,εF,eigenva
   #This is just multiplying the gradient by the inverse Hessian (this is the main info I have on this, I should read more on this: https://arxiv.org/pdf/1804.01590.pdf)
   prec_grad_vec = inv(Hessian)*grad_vec
   prec_lambda_grads = vector_2_lambdas(prec_grad_vec,constraints)
-  println(inv(Hessian))
-  println(grad_vec)
-  println(prec_grad_vec)
+
+  println("log: Hessian: $Hessian")
+  println("log: preconditioned gradient: $prec_grad_vec")
 
   return prec_lambda_grads
 
@@ -165,6 +166,9 @@ which is done within a combined struct ArrayAndConstraints
         constraints = get_constraints(basis)
         constraints.lambdas = ρin_cons.lambdas
 
+        lambdas_prnt = lambdas_2_vector(ρin_cons.lambdas,constraints)
+        println("log: lambdas: $lambdas_prnt")
+
         # Note that ρin is not the density of ψ, and the eigenvalues
         # are not the self-consistent ones, which makes this energy non-variational
         energies, ham = energy_hamiltonian(basis, ψ, occupation; ρ=ρin, eigenvalues, εF, 
@@ -176,7 +180,6 @@ which is done within a combined struct ArrayAndConstraints
         ψ, eigenvalues, occupation, εF, ρout = nextstate
 
         resid = residual(ρout,ρin_cons,basis)
-        println(resid.lambdas)
         ρout_cons = resid + ρin_cons
 
         # Update info with results gathered so far

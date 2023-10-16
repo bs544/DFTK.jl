@@ -4,6 +4,11 @@ using JLD2
 using GLMakie
 GLMakie.activate!(inline=false)
 
+"""
+Check that the transformations of the gradient and the Hessian match.
+This is the 
+"""
+
 function run_iron_constrain()
     #TODO: Double check units for this. I think they're off somewhere. Maybe the spin density isn't in μᵦ
     function central_diff(x,y)
@@ -42,10 +47,10 @@ function run_iron_constrain()
     lattice = a .* [1.0 0.0 0.0;
                     0.0 1.0 0.0;
                     0.0 0.0 1.0]
-    temperature=0.01
+    temperature=0.05
     
     idx = 1
-    resid_weight = 0.7 # 0.5 works for simple mixing with α=0.2
+    resid_weight = 0.05 # 0.5 works for simple mixing with α=0.2
     r_sm_frac    = 0.1
     r_cut        = 2.0
     α            = 0.8
@@ -72,11 +77,11 @@ function run_iron_constrain()
     tol=0.003
     # λ1_range =  0.025:0.00125:0.035
     # λ2_range = -0.005:0.00125:0.005
-    λ1_range = -0.1:0.02:0.1#-0.2:0.02:0.1
-    λ2_range = -0.1:0.02:0.1#-0.2:0.02:0.1
+    λ1_range = -0.2:0.02:0.1
+    λ2_range = -0.2:0.02:0.1
     λ1_Hessian = 0.0
-    λ2_Hessian = 0.0
-    maxiter = 10
+    λ2_Hessian = -0.08
+    maxiter = 1
     mixing=DFTK.LdosMixing()
 
     scfres_fname="test/lambdagrid_initial.jld2"
@@ -86,8 +91,7 @@ function run_iron_constrain()
         scfres = load_scfres(scfres_fname)
     else
         ρ0 = guess_density(basis,magnetic_moments)
-        solver = cDFT_anderson_solver(basis)
-        scfres = DFTK.density_mixed_constrained(basis;solver,tol=1.0e-10,ρ=ρ0,maxiter,damping=α,lambdas_preconditioning=detail,initial_lambdas)
+        scfres = DFTK.density_mixed_constrained(basis;tol=1.0e-10,ρ=ρ0,maxiter,damping=α,lambdas_preconditioning=detail,initial_lambdas)
         save_scfres(scfres_fname,scfres)
         println("done initial setup")
     end
