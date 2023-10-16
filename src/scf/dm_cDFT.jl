@@ -90,6 +90,15 @@ function precondition(lambda_grads,constraints,detail;ham,basis,ρin,εF,eigenva
 
 end
 
+function initial_optimise!(max_cons_iter,basis,nbandsalg,fermialg,ρ;display_results=true,λ_tol=1e-4,n_Ham_diags=[],diagtol=1e-4)
+  """
+  Run a few iterations where only the Lagrange multipliers are updated to provide a better start for the SCF loop
+  At the moment, just run the innerloop! function
+  This'll update the basis with a good guess
+  """
+  innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;display_results)
+  end
+
 @doc raw"""
     density_mixed_constrained(basis; [tol, mixing, damping, ρ, ψ])
 
@@ -215,12 +224,15 @@ which is done within a combined struct ArrayAndConstraints
     ρout_cons = ArrayAndConstraints(ρout,basis)
     if !isnothing(initial_lambdas)
       ρout_cons.lambdas = initial_lambdas
+      update_constraints!(basis,initial_lambdas)
     end
 
     if initial_lambda_optimisation > 0
-      #do an initial few steps to update the 
-      println("not implemented yet")
-    end
+      #do an initial few steps to update the basis with the 
+      initial_optimise!(initial_lambda_optimisation,basis,nbandsalg,fermialg,ρout)
+      constraints=get_constraints(basis)
+      ρout_cons.lambdas=constraints.lambdas
+    end    
 
     solver(fixpoint_map, ρout_cons, maxiter; tol=eps(T))
 
