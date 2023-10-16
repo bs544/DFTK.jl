@@ -185,7 +185,7 @@ function EnDerivsFromLagrange(λ;basis,ρ,weights,ψ,occupation,εF,eigenvalues,
     return E, deriv_array, Hessian
 end
 
-function innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,display_results=false,method=Newton())
+function innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;ψ=nothing,occupation=nothing,εF=nothing,eigenvalues=nothing,display_results=false,method="Newton")
     """
     Find the value for the Lagrange Multipliers that satisfies the constraints kept in basis.
     Beyond the expected inputs needed to form and diagonalise the Hamiltonian, the two other inputs are:
@@ -211,9 +211,16 @@ function innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_H
     end
     λ = lambdas_2_vector(lambdas,constraints)
     λ = zeros(Float64,size(λ))
-    optim_results = Optim.optimize(Optim.only_fgh!(fgh!),λ,method;
-                                   store_trace=true,extended_trace=true,
-                                   iterations=max_cons_iter,show_trace=false,inplace=true,x_tol=λ_tol)
+    if method == "Newton"
+        optim_results = Optim.optimize(Optim.only_fgh!(fgh!),λ,method=Newton();
+                                    store_trace=true,extended_trace=true,
+                                    iterations=max_cons_iter,show_trace=false,inplace=true,x_tol=λ_tol)
+    elseif method=="CG"
+        optim_results = Optim.optimize(Optim.only_fgh!(fgh!),λ,method=ConjugateGradient();
+                                    store_trace=true,extended_trace=true,
+                                    iterations=max_cons_iter,show_trace=false,inplace=true,x_tol=λ_tol)
+    end
+        
     new_lambdas= Optim.x_trace(optim_results)[end]
 
     if display_results

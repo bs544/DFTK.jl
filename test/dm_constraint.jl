@@ -94,7 +94,7 @@ function run_iron_constrain()
         add_constraint!(terms,constraint_term)
         model = Model(model;terms)
         initial_lambdas = nothing #[0.0 0.03; 0.0 0.0]
-        initial_lambda_optimisation=3
+        initial_lambda_optimisation=2
         basis = PlaneWaveBasis(model; Ecut=15, kgrid=[3,3,3])
         solver = cDFT_anderson_solver(basis)
         # solver = scf_anderson_solver()

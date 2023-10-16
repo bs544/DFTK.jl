@@ -96,7 +96,7 @@ function initial_optimise!(max_cons_iter,basis,nbandsalg,fermialg,ρ;display_res
   At the moment, just run the innerloop! function
   This'll update the basis with a good guess
   """
-  innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;display_results)
+  innerloop!(ρ,basis,nbandsalg,fermialg,diagtol,λ_tol,max_cons_iter,n_Ham_diags;display_results,method="CG")
   end
 
 @doc raw"""
